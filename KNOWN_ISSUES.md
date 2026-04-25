@@ -102,7 +102,7 @@ FROM python:3.12-slim AS builder
 Y `docker-compose.yml` referencia Ollama con un parámetro:
 
 ```
-OLLAMA_IMAGE: ${OLLAMA_IMAGE:-ollama/ollama:latest}
+OLLAMA_IMAGE: ${OLLAMA_IMAGE:-ollama/ollama:0.21.2}
 ```
 
 Si las imágenes en Docker Hub se actualizan o se ven comprometidas,
@@ -114,7 +114,7 @@ fijar las imágenes por su digest SHA256:
 
 ```
 FROM python:3.12-slim@sha256:XXXXXXXXX...
-OLLAMA_IMAGE=ollama/ollama:0.5.7@sha256:YYYYYYYYY...
+OLLAMA_IMAGE=ollama/ollama:0.21.2@sha256:YYYYYYYYY...
 ```
 
 Esto se hará tras el primer ciclo de pruebas con archiveros reales
@@ -195,26 +195,8 @@ hasta que el usuario ejecute `detener.bat` / `detener.sh` o
 detención manualmente.
 
 
-## Modelo personalizado con cuadrícula de checkboxes
+## Modo personalizado
 
-El frontend tiene tres modos de selección de campos: **esencial**,
-**estándar** y **personalizado**. Los dos primeros funcionan; el
-tercero **está comentado en el código** como pendiente de
-implementación.
+El modo personalizado ya permite seleccionar campos visibles y exportables desde la interfaz. Si se aplica después de procesar un documento, actúa como filtro visual y de exportación. Si se pulsa **Reprocesar** con el modo personalizado activo, la selección se envía al backend para limitar también la extracción del modelo.
 
-Por ahora, "personalizado" se comporta como "estándar". La
-implementación completa (cuadrícula con checkbox por área de la
-norma activa) requiere trabajo adicional de UI que se hará tras el
-feedback de la alpha.
-
-
-## Conclusión
-
-Ninguno de los problemas listados aquí es bloqueante para alpha
-pública. Todos están reconocidos, ninguno permite ejecución de
-código remoto ni exfiltración de datos en condiciones de uso normal,
-y todos tienen mitigación planificada.
-
-Si encuentras un problema no listado aquí, repórtalo según las
-instrucciones de `SECURITY.md` (si es de seguridad) o abre un issue
-público en GitHub (si es funcional).
+Limitación conocida: si se cambia de norma, conviene reprocesar antes de reutilizar una selección personalizada, porque las claves de campo pueden no coincidir entre normas.

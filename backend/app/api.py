@@ -16,6 +16,7 @@ y limitación de concurrencia para operaciones pesadas.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -30,8 +31,9 @@ from fastapi.responses import Response
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from . import extractor, identificador_tipo, router as router_entrada
+from . import auditoria, extractor, identificador_tipo, router as router_entrada
 from .router import ErrorValidacion
+from .version import APP_VERSION
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +42,7 @@ logger = logging.getLogger(__name__)
 # Configuración
 # =============================================================================
 
-MODELO = os.getenv("MODELO_NOMBRE", "asistente-archivistico")
+MODELO = os.getenv("MODELO_NOMBRE", "pluma")
 DIR_ESQUEMAS = Path(os.getenv("DIR_ESQUEMAS", "/app/schemas"))
 RUTA_CATALOGO_TIPOS = DIR_ESQUEMAS / "tipos-documentales.yaml"
 
@@ -60,6 +62,9 @@ MAX_PROCESAMIENTOS_SIMULTANEOS = max(
 PERMITIR_APAGADO_UI = os.getenv("PERMITIR_APAGADO_UI", "true").strip().lower() in {
     "1", "true", "yes", "si", "sí", "on"
 }
+INCLUIR_HASH_DOCUMENTO_AUDITORIA = os.getenv(
+    "INCLUIR_HASH_DOCUMENTO_AUDITORIA", "true"
+).strip().lower() in {"1", "true", "yes", "si", "sí", "on"}
 
 IDIOMAS_SALIDA_ADMITIDOS = {"es", "en"}
 
@@ -67,9 +72,16 @@ _SEM_PROCESAMIENTO = asyncio.Semaphore(MAX_PROCESAMIENTOS_SIMULTANEOS)
 
 NORMAS_DISPONIBLES = {
     "isad-g":    {"archivo": "isad-g.yaml",    "nombre": "ISAD(G)",    "titulo": "Descripción archivística"},
+    "dacs":      {"archivo": "dacs.yaml",      "nombre": "DACS",       "titulo": "Describing Archives - Content Standard"},
     "isaar-cpf": {"archivo": "isaar-cpf.yaml", "nombre": "ISAAR(CPF)", "titulo": "Registros de autoridad"},
     "isdf":      {"archivo": "isdf.yaml",      "nombre": "ISDF",       "titulo": "Descripción de funciones"},
     "isdiah":    {"archivo": "isdiah.yaml",    "nombre": "ISDIAH",     "titulo": "Instituciones de archivo"},
+    # RIC simplificado: una entrada por perfil. Internamente apuntan al
+    # mismo YAML pero con un perfil distinto.
+    "ric-record":     {"archivo": "ric.yaml", "perfil": "record",     "nombre": "RIC Record",     "titulo": "RIC - Documento (Record)"},
+    "ric-recordset":  {"archivo": "ric.yaml", "perfil": "recordset",  "nombre": "RIC RecordSet",  "titulo": "RIC - Conjunto documental (RecordSet)"},
+    "ric-agent":      {"archivo": "ric.yaml", "perfil": "agent",      "nombre": "RIC Agent",      "titulo": "RIC - Agente (Agent)"},
+    "ric-activity":   {"archivo": "ric.yaml", "perfil": "activity",   "nombre": "RIC Activity",   "titulo": "RIC - Actividad (Activity)"},
 }
 
 # Campos del modo "Esencial" — los 6 que todo archivero quiere siempre
@@ -300,6 +312,10 @@ async def describir(
 
     async with _SEM_PROCESAMIENTO:
         contenido = await fichero.read()
+        sha256_documento = (
+            hashlib.sha256(contenido).hexdigest()
+            if INCLUIR_HASH_DOCUMENTO_AUDITORIA else None
+        )
         _log_peticion(
             "describir_inicio",
             peticion_id,
@@ -332,10 +348,13 @@ async def describir(
         )
 
         ruta_esquema = DIR_ESQUEMAS / NORMAS_DISPONIBLES[norma]["archivo"]
+        perfil = NORMAS_DISPONIBLES[norma].get("perfil")
         try:
-            esquema = extractor.cargar_esquema(ruta_esquema)
+            esquema = extractor.cargar_esquema(ruta_esquema, perfil=perfil)
         except FileNotFoundError:
             raise HTTPException(500, f"Esquema de norma no disponible: {norma}") from None
+        except ValueError as e:
+            raise HTTPException(500, f"Esquema inválido: {e}") from None
 
         filtro_claves = _construir_filtro(modo, campos, norma, esquema)
 
@@ -388,11 +407,26 @@ async def describir(
             advertencias=len(propuesta.advertencias),
         )
 
+    ficha_tecnica = auditoria.generar_ficha_tecnica(
+        peticion_id=peticion_id,
+        documento=doc,
+        esquema=esquema,
+        modo=modo,
+        idioma_salida=idioma_salida,
+        modelo=MODELO,
+        filtro_claves=filtro_claves,
+        propuesta=propuesta,
+        deteccion=deteccion,
+        sha256_documento=sha256_documento,
+    )
+
     return {
         "peticion": peticion_id,
         "idioma_salida": idioma_salida,
+        "version_pluma": APP_VERSION,
         "documento": {
             "nombre": doc.nombre_original,
+            "sha256": sha256_documento,
             "tipo_mime": doc.tipo_mime,
             "tamano_bytes": doc.tamano_bytes,
             "paginas": doc.paginas,
@@ -407,6 +441,7 @@ async def describir(
                 "evidencia": deteccion.evidencia,
             } if deteccion else None
         ),
+        "auditoria": ficha_tecnica,
         "propuesta": propuesta.to_dict(),
     }
 
@@ -442,7 +477,7 @@ def _construir_filtro(
 @router.post("/exportar/{formato}")
 async def exportar(formato: str, payload: dict):
     """Exporta una propuesta editada en el formato solicitado."""
-    formatos_validos = {"json", "csv", "ead", "eac-cpf"}
+    formatos_validos = {"json", "csv", "ead", "eac-cpf", "turtle"}
     if formato not in formatos_validos:
         raise HTTPException(400, f"Formato no soportado: {formato}")
 
@@ -461,6 +496,7 @@ async def exportar(formato: str, payload: dict):
         raise HTTPException(400, f"Norma no reconocida: {norma_nombre}")
 
     ruta_esquema = DIR_ESQUEMAS / NORMAS_DISPONIBLES[norma_clave]["archivo"]
+    perfil = NORMAS_DISPONIBLES[norma_clave].get("perfil")
 
     try:
         from . import exportadores
@@ -469,6 +505,7 @@ async def exportar(formato: str, payload: dict):
             propuesta=payload,
             norma=norma_clave,
             ruta_esquema=ruta_esquema,
+            perfil=perfil,
         )
     except ValueError as e:
         raise HTTPException(400, str(e)) from None
@@ -555,6 +592,7 @@ def _validar_cadena_corta(
             400,
             f"Campo #{idx + 1}: '{nombre}' supera la longitud máxima de {max_len} caracteres.",
         )
+    _validar_sin_controles_peligrosos(valor, nombre, idx)
 
 
 def _validar_valor_exportacion(valor: Any, idx: int) -> None:
@@ -567,6 +605,7 @@ def _validar_valor_exportacion(valor: Any, idx: int) -> None:
                 f"Campo #{idx + 1}: valor demasiado largo; máximo "
                 f"{MAX_LONGITUD_VALOR_EXPORTACION} caracteres.",
             )
+        _validar_sin_controles_peligrosos(valor, "valor", idx)
         return
     if isinstance(valor, list):
         if len(valor) > MAX_ITEMS_LISTA_EXPORTACION:
@@ -584,10 +623,22 @@ def _validar_valor_exportacion(valor: Any, idx: int) -> None:
                     f"Campo #{idx + 1}: elemento de lista demasiado largo; máximo "
                     f"{MAX_LONGITUD_VALOR_EXPORTACION} caracteres.",
                 )
+            _validar_sin_controles_peligrosos(item, "valor", idx)
         return
     if isinstance(valor, (int, float, bool)):
         return
     raise HTTPException(400, f"Campo #{idx + 1}: tipo de valor no admitido.")
+
+
+def _validar_sin_controles_peligrosos(valor: str, nombre: str, idx: int) -> None:
+    """Rechaza caracteres de control incompatibles con XML/RDF/JSON seguro."""
+    for ch in valor:
+        code = ord(ch)
+        if (code < 32 and ch not in "\n\r\t") or code == 127:
+            raise HTTPException(
+                400,
+                f"Campo #{idx + 1}: '{nombre}' contiene caracteres de control no admitidos.",
+            )
 
 
 # =============================================================================

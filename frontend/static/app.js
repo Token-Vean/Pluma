@@ -31,6 +31,7 @@ const estado = {
   tipoDetectado: null,
   campos: [],       // todos los campos (extraibles + no extraibles)
   camposOcultos: [],
+  camposPersonalizados: null,  // Set<clave> con los campos seleccionados en modo personalizado, o null si está desactivado
   csrfToken: null,  // token anti-CSRF, se pide al backend al arrancar
   idioma: localStorage.getItem('idioma-ui') || 'es',
 };
@@ -71,7 +72,7 @@ function escapeHtml(s) {
 const I18N = {
   es: {
     'brand.title': 'PlumA',
-    'brand.subtitle': 'Descripción asistida · v0.3.0-alpha',
+    'brand.subtitle': 'Descripción asistida · v0.4.1-alpha',
     'language.label': 'Idioma',
     'language.title': 'Idioma de la interfaz',
     'engine.statusTitle': 'Estado del motor de IA',
@@ -101,6 +102,22 @@ const I18N = {
     'controls.mode': 'Modo',
     'mode.essential': 'Esencial',
     'mode.complete': 'Completo',
+    'mode.custom': 'Personalizado',
+    'group.description': 'Descripción archivística',
+    'group.authorities': 'Autoridades, funciones e instituciones',
+    'group.ric': 'RIC (simplificado)',
+    'export.turtle.title': 'Descargar como RDF/Turtle (RIC-O)',
+    'custom.button': 'Personalizar campos',
+    'custom.title': 'Selección de campos a mostrar y exportar',
+    'custom.description': 'Elige qué campos quieres mantener visibles y exportables. Si reprocesas en modo personalizado, la selección se enviará al backend para limitar los campos solicitados al modelo.',
+    'custom.selectAll': 'Seleccionar todos',
+    'custom.selectNone': 'Deseleccionar todos',
+    'custom.essentialOnly': 'Solo esenciales',
+    'custom.apply': 'Aplicar',
+    'custom.cancel': 'Cancelar',
+    'custom.atLeastOne': 'Selecciona al menos un campo.',
+    'custom.needsProcessing': 'Procesa primero un documento para personalizar los campos.',
+    'custom.toggleArea': 'Marcar/desmarcar área',
     'reprocess.title': 'Volver a procesar con la configuración actual',
     'reprocess.button': 'Reprocesar',
     'progress.empty': '— campos',
@@ -146,10 +163,27 @@ const I18N = {
     'field.placeholderManual': 'Pendiente de cumplimentar por el archivero',
     'field.placeholderNoEvidence': 'Sin evidencia en el documento; editar manualmente',
     'warnings.title': 'Advertencias del análisis:',
+    'audit.title': 'Ficha técnica del proceso',
+    'audit.summary': 'ID {id} · {ruta} · {localizadas}/{conEvidencia} evidencias verificadas',
+    'audit.downloadTitle': 'Descargar ficha técnica del proceso',
+    'audit.downloaded': 'Ficha técnica descargada',
+    'audit.noData': 'No hay ficha técnica disponible.',
+    'audit.version': 'Versión',
+    'audit.model': 'Modelo',
+    'audit.standard': 'Norma',
+    'audit.mode': 'Modo',
+    'audit.sandbox': 'Sandbox de parsers',
+    'audit.sha256': 'SHA-256',
+    'audit.evidence': 'Control de evidencias',
+    'evidence.localizada': 'evidencia verificada en texto',
+    'evidence.no_localizada': 'evidencia no localizada en texto',
+    'evidence.no_verificable': 'evidencia no verificable textualmente',
+    'evidence.sin_evidencia': 'sin evidencia literal',
+    'evidence.sin_valor': 'sin valor propuesto',
   },
   en: {
     'brand.title': 'PlumA',
-    'brand.subtitle': 'Assisted description · v0.3.0-alpha',
+    'brand.subtitle': 'Assisted description · v0.4.1-alpha',
     'language.label': 'Language',
     'language.title': 'Interface language',
     'engine.statusTitle': 'AI engine status',
@@ -179,6 +213,22 @@ const I18N = {
     'controls.mode': 'Mode',
     'mode.essential': 'Essential',
     'mode.complete': 'Complete',
+    'mode.custom': 'Custom',
+    'group.description': 'Archival description',
+    'group.authorities': 'Authorities, functions and institutions',
+    'group.ric': 'RIC (simplified)',
+    'export.turtle.title': 'Download as RDF/Turtle (RIC-O)',
+    'custom.button': 'Customize fields',
+    'custom.title': 'Select fields to display and export',
+    'custom.description': 'Choose which fields you want to keep visible and exportable. If you reprocess in custom mode, the selection is sent to the backend to limit the fields requested from the model.',
+    'custom.selectAll': 'Select all',
+    'custom.selectNone': 'Deselect all',
+    'custom.essentialOnly': 'Essentials only',
+    'custom.apply': 'Apply',
+    'custom.cancel': 'Cancel',
+    'custom.atLeastOne': 'Select at least one field.',
+    'custom.needsProcessing': 'Process a document first before customizing fields.',
+    'custom.toggleArea': 'Toggle area',
     'reprocess.title': 'Process again with the current settings',
     'reprocess.button': 'Reprocess',
     'progress.empty': '— fields',
@@ -224,6 +274,23 @@ const I18N = {
     'field.placeholderManual': 'Pending manual completion by the archivist',
     'field.placeholderNoEvidence': 'No evidence in the document; edit manually',
     'warnings.title': 'Analysis warnings:',
+    'audit.title': 'Technical process sheet',
+    'audit.summary': 'ID {id} · {ruta} · {localizadas}/{conEvidencia} evidence snippets verified',
+    'audit.downloadTitle': 'Download technical process sheet',
+    'audit.downloaded': 'Technical sheet downloaded',
+    'audit.noData': 'No technical sheet available.',
+    'audit.version': 'Version',
+    'audit.model': 'Model',
+    'audit.standard': 'Standard',
+    'audit.mode': 'Mode',
+    'audit.sandbox': 'Parser sandbox',
+    'audit.sha256': 'SHA-256',
+    'audit.evidence': 'Evidence control',
+    'evidence.localizada': 'evidence verified in text',
+    'evidence.no_localizada': 'evidence not found in text',
+    'evidence.no_verificable': 'evidence not text-verifiable',
+    'evidence.sin_evidencia': 'no literal evidence',
+    'evidence.sin_valor': 'no proposed value',
   },
 };
 
@@ -412,13 +479,54 @@ function actualizarSelectorNormas() {
   if (!selector) return;
   const valorPrevio = selector.value || estado.normaActual;
   selector.innerHTML = '';
-  for (const n of estado.normas) {
-    const op = document.createElement('option');
-    op.value = n.clave;
-    op.textContent = textoOpcionNorma(n);
-    selector.appendChild(op);
+
+  // Agrupamos visualmente por familia. Las claves se reconocen por prefijo
+  // o por estar en una lista conocida.
+  const grupos = {
+    descripcion: { label: t('group.description') || 'Descripción archivística', claves: ['isad-g', 'dacs'] },
+    autoridades: { label: t('group.authorities') || 'Autoridades, funciones e instituciones', claves: ['isaar-cpf', 'isdf', 'isdiah'] },
+    ric:         { label: t('group.ric') || 'RIC (simplificado)', claves: ['ric-record', 'ric-recordset', 'ric-agent', 'ric-activity'] },
+  };
+
+  // Indexamos las normas que vienen del backend
+  const normasPorClave = {};
+  for (const n of estado.normas) normasPorClave[n.clave] = n;
+
+  // Renderizamos cada grupo si tiene al menos una norma disponible
+  let primeraClave = null;
+  for (const grupoId of ['descripcion', 'autoridades', 'ric']) {
+    const grupo = grupos[grupoId];
+    const normasGrupo = grupo.claves
+      .map(c => normasPorClave[c])
+      .filter(Boolean);
+    if (normasGrupo.length === 0) continue;
+
+    const og = document.createElement('optgroup');
+    og.label = grupo.label;
+    for (const n of normasGrupo) {
+      const op = document.createElement('option');
+      op.value = n.clave;
+      op.textContent = textoOpcionNorma(n);
+      og.appendChild(op);
+      if (!primeraClave) primeraClave = n.clave;
+    }
+    selector.appendChild(og);
   }
-  estado.normaActual = valorPrevio || (estado.normas[0] && estado.normas[0].clave);
+
+  // Cualquier norma que no caiga en los grupos conocidos va al final, suelta
+  const clavesEnGrupos = new Set();
+  for (const g of Object.values(grupos)) g.claves.forEach(c => clavesEnGrupos.add(c));
+  for (const n of estado.normas) {
+    if (!clavesEnGrupos.has(n.clave)) {
+      const op = document.createElement('option');
+      op.value = n.clave;
+      op.textContent = textoOpcionNorma(n);
+      selector.appendChild(op);
+      if (!primeraClave) primeraClave = n.clave;
+    }
+  }
+
+  estado.normaActual = valorPrevio || primeraClave;
   selector.value = estado.normaActual;
 }
 
@@ -653,6 +761,9 @@ async function procesarFichero(fichero) {
   fd.append('fichero', fichero);
   fd.append('norma', estado.normaActual);
   fd.append('modo', estado.modoActual);
+  if (estado.modoActual === 'personalizado' && estado.camposPersonalizados) {
+    fd.append('campos', Array.from(estado.camposPersonalizados).join(','));
+  }
   fd.append('detectar_tipo', 'true');
   fd.append('idioma_salida', estado.idioma);
 
@@ -672,6 +783,19 @@ async function procesarFichero(fichero) {
     estado.propuestaActual = data;
     estado.tipoDetectado = data.tipo_detectado;
     estado.campos = data.propuesta.campos;
+
+    // Mantener la selección personalizada solo si se reprocesó explícitamente
+    // en modo personalizado. En los demás casos se vuelve al modo activo normal.
+    if (estado.modoActual !== 'personalizado') {
+      estado.camposPersonalizados = null;
+    }
+    document.querySelectorAll('#selector-modo .modo').forEach(b => {
+      if (b.id === 'boton-personalizar') {
+        b.classList.toggle('activo', estado.modoActual === 'personalizado');
+      } else {
+        b.classList.toggle('activo', b.dataset.modo === estado.modoActual);
+      }
+    });
 
     renderSesion();
     irASesion();
@@ -729,8 +853,9 @@ function renderSesion() {
   // Render de los campos
   renderCampos();
 
-  // Advertencias
+  // Advertencias y ficha técnica
   renderAdvertencias(data.propuesta.advertencias || []);
+  renderAuditoria(data.auditoria || null);
 
   // Visibilidad de botones de exportación según norma
   actualizarBotonesExportacion();
@@ -742,13 +867,20 @@ function renderCampos() {
 
   const campos = estado.campos;
 
-  // En modo esencial/personalizado, ocultamos los campos que la IA no
-  // procesó (valor nulo + extraible != "no"). Los dejamos en un buffer
-  // por si el usuario pide mostrarlos.
-  const campoActivo = c =>
-    c.extraible === 'no' ||             // siempre mostrar los manuales
-    c.valor !== null ||                 // con propuesta
-    estado.modoActual === 'completo';   // modo completo: mostrar todo
+  // Reglas de visibilidad:
+  //   - Si hay filtro personalizado activo, solo mostrar los marcados.
+  //   - Si no, en modo esencial ocultamos los que no llegaron procesados.
+  //   - En modo completo, mostrar todo.
+  let campoActivo;
+  if (estado.camposPersonalizados) {
+    const sel = estado.camposPersonalizados;
+    campoActivo = c => sel.has(c.clave);
+  } else {
+    campoActivo = c =>
+      c.extraible === 'no' ||             // siempre mostrar los manuales
+      c.valor !== null ||                 // con propuesta
+      estado.modoActual === 'completo';   // modo completo: mostrar todo
+  }
 
   const activos = campos.filter(campoActivo);
   const ocultos = campos.filter(c => !campoActivo(c));
@@ -781,6 +913,7 @@ function renderCampos() {
     $('n-ocultos').textContent = ocultos.length;
     mostrar.onclick = () => {
       estado.modoActual = 'completo';
+      estado.camposPersonalizados = null;
       document.querySelectorAll('.modo').forEach(b => {
         b.classList.toggle('activo', b.dataset.modo === 'completo');
       });
@@ -796,9 +929,8 @@ function renderCampos() {
 }
 
 function agruparPorArea(campos) {
-  // El id de los campos tiene formato "X.Y.Z"; agrupamos por "X.Y".
-  // Los nombres de área los infiero genéricamente; si el backend los
-  // expusiese directamente sería más elegante, pero esto vale para v0.2.
+  // Preferimos el área enviada por el backend. Si falta, agrupamos por
+  // el prefijo normativo del id del campo (X.Y.Z → X.Y).
   const nombres = {
     // ISAD(G)
     '3.1': 'Área de identificación',
@@ -819,8 +951,8 @@ function agruparPorArea(campos) {
 
   const mapa = new Map();
   for (const c of campos) {
-    const clave = c.id.split('.').slice(0, 2).join('.');
-    const etiqueta = nombres[clave] || ((estado.idioma === 'en' ? 'Area ' : 'Área ') + clave);
+    const clave = (c.id || '').split('.').slice(0, 2).join('.');
+    const etiqueta = c.area_nombre || nombres[clave] || ((estado.idioma === 'en' ? 'Area ' : 'Área ') + clave);
     if (!mapa.has(etiqueta)) mapa.set(etiqueta, []);
     mapa.get(etiqueta).push(c);
   }
@@ -830,6 +962,9 @@ function agruparPorArea(campos) {
 function crearElementoCampo(c) {
   const tpl = $('plantilla-campo');
   const nodo = tpl.content.cloneNode(true).firstElementChild;
+
+  // Clave del campo en dataset (para sincronización fiable al exportar)
+  nodo.dataset.clave = c.clave;
 
   // Clase de confianza
   if (c.confianza) nodo.classList.add('confianza-' + c.confianza);
@@ -875,11 +1010,17 @@ function crearElementoCampo(c) {
     c.valor = valorEl.value;
   });
 
-  // Evidencia
+  // Evidencia y estado de verificación
   if (c.evidencia) {
     const ev = nodo.querySelector('.campo-evidencia');
     ev.style.display = 'block';
     ev.textContent = '«' + c.evidencia + '»';
+  }
+  if (c.estado_evidencia) {
+    const evEstado = nodo.querySelector('.campo-evidencia-estado');
+    evEstado.style.display = 'inline-flex';
+    evEstado.className = 'campo-evidencia-estado estado-' + c.estado_evidencia;
+    evEstado.textContent = t('evidence.' + c.estado_evidencia) || c.estado_evidencia;
   }
 
   // Copiar
@@ -925,6 +1066,69 @@ function renderAdvertencias(lista) {
     <span><strong>${escapeHtml(t('warnings.title'))}</strong><br>${lista.map(escapeHtml).join('<br>')}</span>
   `;
   contenedor.appendChild(div);
+}
+
+function renderAuditoria(auditoria) {
+  const box = $('ficha-auditoria');
+  const resumen = $('ficha-auditoria-resumen');
+  const detalle = $('ficha-auditoria-detalle');
+  if (!box || !resumen || !detalle) return;
+
+  if (!auditoria) {
+    box.style.display = 'none';
+    detalle.innerHTML = '';
+    return;
+  }
+
+  const ce = auditoria.control_evidencia || {};
+  const doc = auditoria.documento || {};
+  const cfg = auditoria.configuracion || {};
+  const seg = auditoria.controles_seguridad || {};
+  const app = auditoria.aplicacion || {};
+
+  resumen.textContent = t('audit.summary', {
+    id: auditoria.peticion_id || '—',
+    ruta: doc.ruta_procesamiento || '—',
+    localizadas: ce.evidencias_localizadas || 0,
+    conEvidencia: ce.campos_con_evidencia || 0,
+  });
+
+  const filas = [
+    [t('audit.version'), `${app.nombre || 'PlumA'} ${app.version || ''}`.trim()],
+    [t('audit.standard'), `${cfg.norma || '—'} ${cfg.version_norma ? '(' + cfg.version_norma + ')' : ''}`.trim()],
+    [t('audit.mode'), cfg.modo || '—'],
+    [t('audit.model'), cfg.modelo || '—'],
+    [t('audit.sandbox'), seg.sandbox_parsers_activo ? 'activo' : 'inactivo'],
+    [t('audit.sha256'), doc.sha256 || '—'],
+    [t('audit.evidence'), `${ce.evidencias_localizadas || 0} localizadas · ${ce.evidencias_no_localizadas || 0} no localizadas · ${ce.evidencias_no_verificables_textualmente || 0} no verificables`],
+  ];
+
+  detalle.innerHTML = filas.map(([k, v]) => `
+    <div class="ficha-auditoria-fila">
+      <span>${escapeHtml(k)}</span>
+      <strong>${escapeHtml(v)}</strong>
+    </div>
+  `).join('');
+
+  box.style.display = 'block';
+}
+
+function descargarAuditoria() {
+  const auditoria = estado.propuestaActual && estado.propuestaActual.auditoria;
+  if (!auditoria) {
+    toast(t('audit.noData'), 'error');
+    return;
+  }
+  const blob = new Blob([JSON.stringify(auditoria, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `pluma-ficha-tecnica-${auditoria.peticion_id || 'proceso'}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  toast(t('audit.downloaded'), 'ok');
 }
 
 
@@ -977,27 +1181,45 @@ async function exportar(formato) {
     return;
   }
 
-  // Sincronizar los valores editados en la UI con la estructura en memoria
-  // (los cambios en los textarea ya están en estado.campos por el listener
-  // de 'change'; aquí forzamos por si algún navegador no lo disparó).
-  document.querySelectorAll('.campo').forEach((elCampo, i) => {
+  // Sincronizar los valores editados en la UI con la estructura en memoria.
+  // Cada elemento .campo tiene un dataset.clave con la clave del campo;
+  // así no dependemos del orden de los elementos en el DOM (que puede
+  // estar filtrado por el modo personalizado).
+  document.querySelectorAll('.campo').forEach((elCampo) => {
+    const clave = elCampo.dataset.clave;
     const ta = elCampo.querySelector('.campo-valor');
-    if (ta && estado.campos[i]) {
+    if (!clave || !ta) return;
+    const campo = estado.campos.find(c => c.clave === clave);
+    if (campo) {
       const valorActual = ta.value;
-      if (valorActual !== (estado.campos[i].valor || '')) {
-        estado.campos[i].valor = valorActual;
+      if (valorActual !== (campo.valor || '')) {
+        campo.valor = valorActual;
       }
     }
   });
 
-  // Actualizar los campos en la propuesta
-  estado.propuestaActual.propuesta.campos = estado.campos;
+  // Si hay filtro personalizado activo, solo se exportan los campos
+  // seleccionados. El resto se omite del payload.
+  let camposParaExportar = estado.campos;
+  if (estado.camposPersonalizados) {
+    const sel = estado.camposPersonalizados;
+    camposParaExportar = estado.campos.filter(c => sel.has(c.clave));
+  }
+
+  // Construir payload sin mutar la propuesta original
+  const payload = {
+    ...estado.propuestaActual,
+    propuesta: {
+      ...estado.propuestaActual.propuesta,
+      campos: camposParaExportar,
+    },
+  };
 
   try {
     const r = await fetchProtegido('/api/exportar/' + formato, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(estado.propuestaActual),
+      body: JSON.stringify(payload),
     });
 
     if (!r.ok) {
@@ -1032,16 +1254,170 @@ async function exportar(formato) {
 }
 
 function actualizarBotonesExportacion() {
-  // Mostrar EAD solo para ISAD(G), EAC-CPF solo para ISAAR(CPF).
-  // JSON y CSV están siempre disponibles.
-  const esIsad = estado.normaActual === 'isad-g';
-  const esIsaar = estado.normaActual === 'isaar-cpf';
+  // Reglas de visibilidad por norma:
+  //   JSON, CSV    → siempre disponibles
+  //   EAD          → ISAD(G) y DACS (ambas son normas de descripción archivística)
+  //   EAC-CPF      → solo ISAAR(CPF)
+  //   Turtle (RDF) → solo perfiles RIC
+  const norma = estado.normaActual || '';
+  const esEad = (norma === 'isad-g' || norma === 'dacs');
+  const esEac = (norma === 'isaar-cpf');
+  const esRic = norma.startsWith('ric-');
 
   const botonEad = $('boton-exportar-ead');
   const botonEac = $('boton-exportar-eac');
+  const botonTurtle = $('boton-exportar-turtle');
 
-  botonEad.style.display = esIsad ? '' : 'none';
-  botonEac.style.display = esIsaar ? '' : 'none';
+  if (botonEad)    botonEad.style.display    = esEad ? '' : 'none';
+  if (botonEac)    botonEac.style.display    = esEac ? '' : 'none';
+  if (botonTurtle) botonTurtle.style.display = esRic ? '' : 'none';
+}
+
+
+/* =============================================================================
+   8d. Modo personalizado: modal de selección de campos
+   -----------------------------------------------------------------------------
+   Funciona después de procesar el documento como filtro visual/exportador.
+   Si el usuario pulsa Reprocesar mientras está activo, la selección se envía
+   al backend para limitar también la extracción del modelo.
+   ========================================================================== */
+
+function abrirModalPersonalizar() {
+  if (!estado.propuestaActual) {
+    toast(t('custom.needsProcessing') || 'Procesa primero un documento para personalizar los campos.');
+    return;
+  }
+  construirCuadriculaModal();
+  $('modal-personalizar').style.display = 'flex';
+}
+
+function cerrarModalPersonalizar() {
+  $('modal-personalizar').style.display = 'none';
+}
+
+function construirCuadriculaModal() {
+  const cuadricula = $('modal-cuadricula');
+  cuadricula.innerHTML = '';
+  
+  // Agrupamos los campos disponibles por área usando el orden del esquema.
+  // Los campos disponibles son los que llegaron en la propuesta.
+  const campos = estado.campos || [];
+  if (campos.length === 0) return;
+  
+  // Agrupación por área enviada por el backend. Si no existe, se infiere por id.
+  const porArea = {};
+  for (const c of campos) {
+    const prefijo = (c.id || '').split('.').slice(0, 2).join('.') || 'general';
+    const area = c.area_id || prefijo;
+    const nombre = c.area_nombre || ((estado.idioma === 'en' ? 'Area ' : 'Área ') + prefijo);
+    if (!porArea[area]) porArea[area] = { nombre, elementos: [] };
+    porArea[area].elementos.push(c);
+  }
+  
+  // Estado actual: si hay personalización previa, usarla; si no, marcar todos
+  const seleccionado = estado.camposPersonalizados || new Set(campos.map(c => c.clave));
+  
+  for (const [areaId, area] of Object.entries(porArea)) {
+    const div = document.createElement('div');
+    div.className = 'modal-area';
+    div.dataset.areaId = areaId;
+    
+    const titulo = document.createElement('div');
+    titulo.className = 'modal-area-titulo';
+    
+    const nombreAr = document.createElement('span');
+    nombreAr.textContent = area.nombre;
+    titulo.appendChild(nombreAr);
+    
+    const cuenta = document.createElement('span');
+    cuenta.className = 'modal-area-cuenta';
+    cuenta.textContent = `${area.elementos.length} ${area.elementos.length === 1 ? 'campo' : 'campos'}`;
+    titulo.appendChild(cuenta);
+    
+    const botonAr = document.createElement('button');
+    botonAr.type = 'button';
+    botonAr.className = 'modal-area-checkbox';
+    botonAr.textContent = t('custom.toggleArea') || 'Marcar/desmarcar área';
+    botonAr.addEventListener('click', () => toggleArea(div));
+    titulo.appendChild(botonAr);
+    
+    div.appendChild(titulo);
+    
+    const campos_div = document.createElement('div');
+    campos_div.className = 'modal-campos';
+    
+    for (const campo of area.elementos) {
+      const label = document.createElement('label');
+      label.className = 'modal-campo';
+      if (campo.obligatorio) label.classList.add('obligatorio');
+      
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.value = campo.clave;
+      cb.checked = seleccionado.has(campo.clave);
+      label.appendChild(cb);
+      
+      const nombre = document.createElement('span');
+      nombre.className = 'modal-campo-nombre';
+      nombre.textContent = campo.nombre || campo.clave;
+      label.appendChild(nombre);
+      
+      if (campo.id) {
+        const codigo = document.createElement('span');
+        codigo.className = 'modal-campo-codigo';
+        codigo.textContent = campo.id;
+        label.appendChild(codigo);
+      }
+      
+      campos_div.appendChild(label);
+    }
+    
+    div.appendChild(campos_div);
+    cuadricula.appendChild(div);
+  }
+}
+
+function toggleArea(divArea) {
+  const checkboxes = divArea.querySelectorAll('input[type="checkbox"]');
+  const todosMarcados = Array.from(checkboxes).every(cb => cb.checked);
+  checkboxes.forEach(cb => { cb.checked = !todosMarcados; });
+}
+
+function marcarTodosCheckboxesModal(valor) {
+  $('modal-cuadricula').querySelectorAll('input[type="checkbox"]').forEach(cb => {
+    cb.checked = valor;
+  });
+}
+
+function marcarSoloEsencialesModal() {
+  $('modal-cuadricula').querySelectorAll('input[type="checkbox"]').forEach(cb => {
+    const label = cb.closest('.modal-campo');
+    cb.checked = label && label.classList.contains('obligatorio');
+  });
+}
+
+function aplicarFiltroPersonalizado() {
+  const seleccionados = new Set();
+  $('modal-cuadricula').querySelectorAll('input[type="checkbox"]:checked').forEach(cb => {
+    seleccionados.add(cb.value);
+  });
+  
+  if (seleccionados.size === 0) {
+    toast(t('custom.atLeastOne') || 'Selecciona al menos un campo.');
+    return;
+  }
+  
+  estado.camposPersonalizados = seleccionados;
+  estado.modoActual = 'personalizado';
+  
+  // Marcar el botón "Personalizar" como activo y desmarcar los otros
+  document.querySelectorAll('#selector-modo .modo').forEach(b => b.classList.remove('activo'));
+  $('boton-personalizar').classList.add('activo');
+  
+  cerrarModalPersonalizar();
+  
+  // Re-renderizar con el filtro aplicado
+  if (estado.propuestaActual) renderCampos();
 }
 
 
@@ -1196,20 +1572,54 @@ function inicializarControles() {
   });
 
   // Selector de modo
-  document.querySelectorAll('.modo').forEach(btn => {
+  document.querySelectorAll('#selector-modo .modo').forEach(btn => {
     btn.addEventListener('click', () => {
-      document.querySelectorAll('.modo').forEach(b => b.classList.remove('activo'));
+      // El botón "Personalizar" abre un modal en vez de cambiar el modo
+      if (btn.id === 'boton-personalizar') {
+        abrirModalPersonalizar();
+        return;
+      }
+      // Los modos normales (esencial / completo)
+      document.querySelectorAll('#selector-modo .modo').forEach(b => {
+        if (b.id !== 'boton-personalizar') b.classList.remove('activo');
+      });
       btn.classList.add('activo');
       estado.modoActual = btn.dataset.modo;
+      // Salir del modo personalizado si lo estábamos
+      estado.camposPersonalizados = null;
       if (estado.propuestaActual) renderCampos();
     });
   });
 
   // Botones de exportación
   $('boton-exportar-json').addEventListener('click', () => exportar('json'));
+  $('boton-exportar-auditoria')?.addEventListener('click', descargarAuditoria);
+  $('ficha-auditoria-toggle')?.addEventListener('click', () => {
+    const detalle = $('ficha-auditoria-detalle');
+    if (detalle) detalle.style.display = detalle.style.display === 'none' ? 'block' : 'none';
+  });
   $('boton-exportar-csv').addEventListener('click', () => exportar('csv'));
   $('boton-exportar-ead').addEventListener('click', () => exportar('ead'));
   $('boton-exportar-eac').addEventListener('click', () => exportar('eac-cpf'));
+  const botonTurtle = $('boton-exportar-turtle');
+  if (botonTurtle) botonTurtle.addEventListener('click', () => exportar('turtle'));
+
+  // Modal de personalización
+  $('modal-cerrar')?.addEventListener('click', cerrarModalPersonalizar);
+  $('modal-cancelar')?.addEventListener('click', cerrarModalPersonalizar);
+  $('modal-overlay')?.addEventListener('click', (e) => {
+    if (e.target.id === 'modal-personalizar') cerrarModalPersonalizar();
+  });
+  $('modal-aplicar')?.addEventListener('click', aplicarFiltroPersonalizado);
+  $('modal-todos')?.addEventListener('click', () => marcarTodosCheckboxesModal(true));
+  $('modal-ninguno')?.addEventListener('click', () => marcarTodosCheckboxesModal(false));
+  $('modal-esenciales')?.addEventListener('click', marcarSoloEsencialesModal);
+  // Cerrar con Escape
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && $('modal-personalizar').style.display !== 'none') {
+      cerrarModalPersonalizar();
+    }
+  });
 }
 
 async function main() {

@@ -651,7 +651,7 @@ def procesar(contenido: bytes, nombre: str) -> DocumentoProcesado:
     """
     if (
         sandbox_activo()
-        and os.getenv("_ASISTENTE_ARCHIVISTICO_SANDBOX_CHILD") != "1"
+        and os.getenv("_PLUMA_SANDBOX_CHILD") != "1"
     ):
         try:
             payload = ejecutar_en_sandbox("app.router:_procesar_impl_serializable", contenido, nombre)

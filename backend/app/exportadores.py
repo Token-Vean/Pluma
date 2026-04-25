@@ -1,5 +1,5 @@
 """
-Exportadores del Asistente Archivístico.
+Exportadores de PlumA.
 
 Cada exportador toma una propuesta editada (el JSON que la UI envía al
 backend después de que el archivero haya revisado y corregido) y devuelve:
@@ -40,6 +40,8 @@ from xml.etree.ElementTree import Element, SubElement, register_namespace, tostr
 
 import yaml
 
+from .version import APP_AGENT
+
 
 # =============================================================================
 # Tipos y utilidades
@@ -59,11 +61,68 @@ def _timestamp() -> str:
     return datetime.now().strftime("%Y%m%d-%H%M%S")
 
 
+def _limpiar_texto_exportacion(texto: Any) -> str:
+    """Elimina controles incompatibles con XML/RDF sin tocar saltos/tabuladores."""
+    s = "" if texto is None else str(texto)
+    return "".join(
+        ch for ch in s
+        if not ((ord(ch) < 32 and ch not in "\n\r\t") or ord(ch) == 127)
+    )
+
+
+def _limpiar_valor_exportacion(valor: Any) -> Any:
+    if isinstance(valor, list):
+        return [_limpiar_texto_exportacion(v) for v in valor]
+    if isinstance(valor, (str, int, float, bool)) or valor is None:
+        return _limpiar_texto_exportacion(valor) if valor is not None else None
+    return None
+
+
 def _obtener_valor(campos: list[dict], clave: str) -> Any:
-    """Busca el valor de un campo por su clave en la lista de propuestos."""
+    """Busca el valor de un campo por su clave en la lista de propuestos.
+    
+    Reconoce alias entre normas equivalentes (DACS <-> ISAD) para que el
+    exportador EAD funcione tanto con ISAD-G como con DACS sin duplicar
+    la lógica de mapeo a EAD3.
+    """
+    # Mapeo de alias: si buscamos una clave ISAD y no la encontramos,
+    # probamos la equivalente DACS (y viceversa).
+    alias = {
+        "titulo": ["title"],
+        "title": ["titulo"],
+        "codigo_referencia": ["reference_code"],
+        "reference_code": ["codigo_referencia"],
+        "fechas": ["date"],
+        "date": ["fechas"],
+        "volumen_soporte": ["extent"],
+        "extent": ["volumen_soporte"],
+        "nombre_productor": ["name_of_creator"],
+        "name_of_creator": ["nombre_productor"],
+        "alcance_contenido": ["scope_and_content"],
+        "scope_and_content": ["alcance_contenido"],
+        "lengua_escritura": ["languages"],
+        "languages": ["lengua_escritura"],
+        "historia_institucional": ["administrative_biographical_history"],
+        "administrative_biographical_history": ["historia_institucional"],
+        "condiciones_acceso": ["conditions_governing_access"],
+        "conditions_governing_access": ["condiciones_acceso"],
+        "condiciones_reproduccion": ["conditions_governing_reproduction"],
+        "conditions_governing_reproduction": ["condiciones_reproduccion"],
+        "notas": ["general_note"],
+        "general_note": ["notas"],
+    }
+    
+    # Búsqueda directa
     for c in campos:
         if c.get("clave") == clave:
-            return c.get("valor")
+            return _limpiar_valor_exportacion(c.get("valor"))
+    
+    # Búsqueda por alias
+    for alt in alias.get(clave, []):
+        for c in campos:
+            if c.get("clave") == alt:
+                return _limpiar_valor_exportacion(c.get("valor"))
+    
     return None
 
 
@@ -71,11 +130,12 @@ def _obtener_valor(campos: list[dict], clave: str) -> Any:
 def _sanear_csv(valor: Any) -> str:
     """
     Mitiga CSV/Formula Injection en hojas de cálculo. Si una celda empieza
-    por caracteres interpretables como fórmula por Excel/LibreOffice, se
-    antepone un apóstrofo. El contenido sigue siendo legible para humanos.
+    —también tras espacios o BOM inicial— por caracteres interpretables como
+    fórmula por Excel/LibreOffice, se antepone un apóstrofo.
     """
-    texto = "" if valor is None else str(valor)
-    if texto.startswith(("=", "+", "-", "@", "\t", "\r", "\n")):
+    texto = _limpiar_texto_exportacion(valor)
+    normalizado_inicio = texto.lstrip(" \ufeff\t\r\n")
+    if normalizado_inicio.startswith(("=", "+", "-", "@")) or texto.startswith(("\t", "\r", "\n")):
         return "'" + texto
     return texto
 
@@ -85,8 +145,8 @@ def _valor_como_lista(valor: Any) -> list[str]:
     if valor is None or valor == "":
         return []
     if isinstance(valor, list):
-        return [str(v) for v in valor if v not in (None, "")]
-    return [str(valor)]
+        return [_limpiar_texto_exportacion(v) for v in valor if v not in (None, "")]
+    return [_limpiar_texto_exportacion(valor)]
 
 
 def _pretty_xml(elemento: Element) -> bytes:
@@ -156,9 +216,10 @@ def exportar_json(propuesta: dict, norma: str) -> tuple[bytes, str, str]:
             "id": c.get("id"),
             "clave": c.get("clave"),
             "nombre": c.get("nombre"),
-            "valor": c.get("valor"),
-            "confianza": c.get("confianza"),
-            "evidencia": c.get("evidencia"),
+            "valor": _limpiar_valor_exportacion(c.get("valor")),
+            "confianza": _limpiar_texto_exportacion(c.get("confianza")),
+            "evidencia": _limpiar_texto_exportacion(c.get("evidencia")),
+            "estado_evidencia": _limpiar_texto_exportacion(c.get("estado_evidencia")),
         })
 
     salida = {
@@ -167,7 +228,8 @@ def exportar_json(propuesta: dict, norma: str) -> tuple[bytes, str, str]:
         "documento": propuesta.get("documento"),
         "tipo_detectado": propuesta.get("tipo_detectado"),
         "campos": campos_limpios,
-        "advertencias": propuesta["propuesta"].get("advertencias", []),
+        "advertencias": [_limpiar_texto_exportacion(a) for a in propuesta["propuesta"].get("advertencias", [])],
+        "auditoria": propuesta.get("auditoria"),
     }
 
     contenido = json.dumps(salida, ensure_ascii=False, indent=2).encode("utf-8")
@@ -261,7 +323,7 @@ def exportar_ead(propuesta: dict, ruta_esquema: Path) -> tuple[bytes, str, str]:
     # maintenancestatus / maintenanceagency (obligatorios en EAD3)
     SubElement(control, "maintenancestatus", {"value": "new"})
     magency = SubElement(control, "maintenanceagency")
-    SubElement(magency, "agencyname").text = "Asistente Archivístico (borrador)"
+    SubElement(magency, "agencyname").text = "PlumA (borrador)"
 
     # languagedeclaration
     langs = _valor_como_lista(_obtener_valor(campos, "lengua_escritura"))
@@ -276,7 +338,7 @@ def exportar_ead(propuesta: dict, ruta_esquema: Path) -> tuple[bytes, str, str]:
     SubElement(mevent, "eventtype", {"value": "created"})
     SubElement(mevent, "eventdatetime").text = datetime.now().isoformat(timespec="seconds")
     SubElement(mevent, "agenttype", {"value": "machine"})
-    SubElement(mevent, "agent").text = "Asistente Archivístico v0.2"
+    SubElement(mevent, "agent").text = APP_AGENT
 
     # archdesc: la descripción propiamente dicha
     nivel = _obtener_valor(campos, "nivel_descripcion") or "item"
@@ -480,7 +542,7 @@ def exportar_eac_cpf(propuesta: dict, ruta_esquema: Path) -> tuple[bytes, str, s
     mstatus.text = _obtener_valor(campos, "estado_elaboracion") or "new"
 
     magency = SubElement(control, "maintenanceAgency")
-    SubElement(magency, "agencyName").text = "Asistente Archivístico (borrador)"
+    SubElement(magency, "agencyName").text = "PlumA (borrador)"
 
     # languageDeclaration
     langs = _valor_como_lista(_obtener_valor(campos, "lenguas_escrituras")) or ["spa"]
@@ -498,7 +560,7 @@ def exportar_eac_cpf(propuesta: dict, ruta_esquema: Path) -> tuple[bytes, str, s
     SubElement(mevent, "eventType").text = "created"
     SubElement(mevent, "eventDateTime").text = datetime.now().isoformat(timespec="seconds")
     SubElement(mevent, "agentType").text = "machine"
-    SubElement(mevent, "agent").text = "Asistente Archivístico v0.2"
+    SubElement(mevent, "agent").text = APP_AGENT
 
     # Fuentes
     fuentes = _valor_como_lista(_obtener_valor(campos, "fuentes"))
@@ -609,6 +671,195 @@ def _mapear_tipo_entidad(tipo: str) -> str:
 
 
 # =============================================================================
+# RDF / Turtle (para RIC simplificado)
+# =============================================================================
+
+# Namespaces RIC-O 1.0 oficiales del CIA-EGAD.
+# https://www.ica.org/standards/RiC/ontology
+RICO_NS = "https://www.ica.org/standards/RiC/ontology#"
+XSD_NS = "http://www.w3.org/2001/XMLSchema#"
+RDF_NS = "http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+RDFS_NS = "http://www.w3.org/2000/01/rdf-schema#"
+
+
+def _escape_turtle_literal(texto: str) -> str:
+    """Escapa una cadena para usarla como literal Turtle.
+    
+    Reglas Turtle (W3C Rec 2014):
+      - " y \\ deben escaparse.
+      - Tab, LF, CR como \\t \\n \\r si queremos one-line literal.
+      - Para textos largos con saltos, usamos triple-comilla.
+    """
+    texto = _limpiar_texto_exportacion(texto)
+    if not texto:
+        return '""'
+    # Si tiene saltos de línea, usamos triple-comilla
+    if "\n" in texto or "\r" in texto:
+        # En triple-comilla, escapamos solo \ y """
+        escaped = texto.replace("\\", "\\\\").replace('"""', '\\"\\"\\"')
+        return f'"""{escaped}"""'
+    # Una sola línea: escapado estándar
+    escaped = (
+        texto.replace("\\", "\\\\")
+             .replace('"', '\\"')
+             .replace("\t", "\\t")
+    )
+    return f'"{escaped}"'
+
+
+def _es_fecha_iso(valor: str) -> bool:
+    """Comprueba si la cadena parece una fecha ISO 8601 (year, year-month,
+    year-month-day, o intervalo year/year)."""
+    if not isinstance(valor, str):
+        return False
+    return bool(re.match(
+        r"^\d{4}(-\d{2}(-\d{2})?)?(/\d{4}(-\d{2}(-\d{2})?)?)?$",
+        valor.strip(),
+    ))
+
+
+def _iri_turtle_seguro(iri: str) -> bool:
+    """Admite solo prefijos Turtle controlados y nombres locales seguros."""
+    if not isinstance(iri, str):
+        return False
+    return bool(re.match(r"^(rico|rdf|rdfs|xsd):[A-Za-z_][A-Za-z0-9_.-]*$", iri))
+
+
+def exportar_turtle(propuesta: dict, ruta_esquema: Path,
+                    perfil: str | None) -> tuple[bytes, str, str]:
+    """
+    Genera un fichero RDF/Turtle compatible con RIC-O 1.0 a partir de
+    una propuesta RIC simplificada.
+    
+    Solo se exporta UNA entidad por fichero (la propia descrita). Las
+    relaciones a otras entidades RIC se podrán expresar en versiones
+    futuras; en esta versión, los nombres de productores/agentes
+    asociados se anotan como literales (rico:descriptiveNote o
+    rico:title sobre nodos en blanco).
+    """
+    if not perfil:
+        raise ValueError(
+            "El formato Turtle solo aplica a esquemas RIC, que requieren "
+            "indicar el perfil (record, recordset, agent o activity)."
+        )
+
+    # Cargar el YAML completo para tener los IRIs por elemento
+    with ruta_esquema.open("r", encoding="utf-8") as f:
+        data = yaml.safe_load(f)
+    if not data.get("multi_perfil"):
+        raise ValueError(
+            "El formato Turtle solo se soporta para esquemas RIC multi-perfil."
+        )
+
+    perfil_data = None
+    for p in data.get("perfiles", []):
+        if p.get("id") == perfil:
+            perfil_data = p
+            break
+    if perfil_data is None:
+        raise ValueError(f"Perfil RIC desconocido: {perfil!r}")
+
+    # Mapeo clave_interna -> IRI completo desde el YAML
+    iris_propiedades: dict[str, str] = {}
+    for area in perfil_data.get("areas", []):
+        for el in area.get("elementos", []):
+            iris_propiedades[el["clave"]] = el["id"]  # ej. "rico:identifier"
+
+    clase = perfil_data["clase"]  # "Record", "Agent", etc.
+
+    campos = propuesta["propuesta"]["campos"]
+
+    # Construir el IRI del sujeto
+    identificador = _obtener_valor(campos, "identifier") or _obtener_valor(campos, "name")
+    if isinstance(identificador, list):
+        identificador = identificador[0] if identificador else None
+    if not identificador:
+        identificador = f"pluma-{_timestamp()}"
+    sujeto_local = re.sub(r"[^A-Za-z0-9_-]+", "-", str(identificador)).strip("-")[:40]
+    if not sujeto_local:
+        sujeto_local = f"pluma-{_timestamp()}"
+
+    lineas = []
+    
+    # Cabecera: prefijos
+    lineas.append("@prefix rico: <https://www.ica.org/standards/RiC/ontology#> .")
+    lineas.append("@prefix rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .")
+    lineas.append("@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .")
+    lineas.append("@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .")
+    lineas.append("@prefix :     <urn:pluma:export#> .")
+    lineas.append("")
+    
+    # Cabecera de comentario
+    fecha_gen = datetime.now().isoformat(timespec="seconds")
+    lineas.append(f"# Generado por PlumA — {fecha_gen}")
+    lineas.append(f"# Norma: RIC simplificado, perfil: {clase}")
+    lineas.append(f"# IMPORTANTE: esta exportación describe UNA ÚNICA entidad RIC.")
+    lineas.append(f"# Las relaciones a otros Records/Agents/Activities deben")
+    lineas.append(f"# añadirse posteriormente en una herramienta nativa RIC.")
+    lineas.append("")
+    
+    # Sujeto principal
+    lineas.append(f":{sujeto_local} a rico:{clase} ;")
+    
+    # Propiedades del sujeto
+    triples_pendientes = []
+    for c in campos:
+        clave = c.get("clave")
+        valor = c.get("valor")
+        if valor in (None, "", []):
+            continue
+        if clave not in iris_propiedades:
+            continue  # campo no mapeado; lo ignoramos
+        
+        iri = iris_propiedades[clave]
+        if not _iri_turtle_seguro(iri):
+            continue
+        valores = _valor_como_lista(valor)
+        
+        for v in valores:
+            v_str = str(v).strip()
+            if not v_str:
+                continue
+            
+            # Las fechas ISO se tipan como xsd:date o xsd:gYear
+            if _es_fecha_iso(v_str):
+                if "/" in v_str:
+                    # Intervalo: lo dejamos como literal sin tipo
+                    literal = _escape_turtle_literal(v_str)
+                else:
+                    # Fecha simple
+                    if len(v_str) == 4:
+                        literal = f'"{v_str}"^^xsd:gYear'
+                    elif len(v_str) == 7:
+                        literal = f'"{v_str}"^^xsd:gYearMonth'
+                    else:
+                        literal = f'"{v_str}"^^xsd:date'
+            else:
+                literal = _escape_turtle_literal(v_str)
+            
+            triples_pendientes.append((iri, literal))
+    
+    # Escribir las triples con el último cerrando con punto
+    for i, (iri, literal) in enumerate(triples_pendientes):
+        terminator = " ." if i == len(triples_pendientes) - 1 else " ;"
+        lineas.append(f"    {iri} {literal}{terminator}")
+    
+    # Si no hay propiedades, cerrar con un rdfs:comment vacío
+    if not triples_pendientes:
+        # Sustituir el ; del sujeto principal por .
+        lineas[-1] = lineas[-1].rstrip(";").rstrip() + "."
+    
+    contenido = "\n".join(lineas).encode("utf-8") + b"\n"
+    
+    nombre_titulo = _obtener_valor(campos, "name") or sujeto_local
+    if isinstance(nombre_titulo, list):
+        nombre_titulo = nombre_titulo[0] if nombre_titulo else "ric-entity"
+    nombre = f"{_slug(str(nombre_titulo))}-{clase.lower()}-{_timestamp()}.ttl"
+    
+    return contenido, "text/turtle; charset=utf-8", nombre
+
+
+# =============================================================================
 # Despachador
 # =============================================================================
 
@@ -617,6 +868,7 @@ def exportar(
     propuesta: dict,
     norma: str,
     ruta_esquema: Path,
+    perfil: str | None = None,
 ) -> tuple[bytes, str, str]:
     """
     Punto de entrada único para los exportadores. Despacha al formato
@@ -634,10 +886,13 @@ def exportar(
         return exportar_csv(propuesta, norma)
 
     if formato == "ead":
-        if norma != "isad-g":
+        # EAD aplica a ISAD(G) y a DACS (ambas son normas de descripción
+        # archivística que mapean a EAD3).
+        if norma not in {"isad-g", "dacs"}:
             raise ValueError(
-                "El formato EAD solo aplica a descripciones ISAD(G). "
-                "Para otras normas use JSON, CSV o EAC-CPF (si procede)."
+                "El formato EAD solo aplica a descripciones archivísticas "
+                "(ISAD(G) o DACS). Para otras normas use JSON, CSV, "
+                "EAC-CPF (si procede) o Turtle (RIC)."
             )
         return exportar_ead(propuesta, ruta_esquema)
 
@@ -645,8 +900,17 @@ def exportar(
         if norma != "isaar-cpf":
             raise ValueError(
                 "El formato EAC-CPF solo aplica a registros de autoridad "
-                "ISAAR(CPF). Para otras normas use JSON o CSV."
+                "ISAAR(CPF). Para otras normas use JSON, CSV o Turtle (RIC)."
             )
         return exportar_eac_cpf(propuesta, ruta_esquema)
+
+    if formato == "turtle":
+        # Turtle/RDF aplica a RIC simplificado.
+        if not norma.startswith("ric-"):
+            raise ValueError(
+                "El formato Turtle (RDF) solo aplica a descripciones RIC. "
+                "Para otras normas use JSON, CSV, EAD o EAC-CPF según corresponda."
+            )
+        return exportar_turtle(propuesta, ruta_esquema, perfil)
 
     raise ValueError(f"Formato desconocido: {formato!r}")

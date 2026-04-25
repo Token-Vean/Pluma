@@ -17,6 +17,8 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from . import api, bootstrap
+from .local_access import ProteccionAccesoLocal
+from .version import APP_NAME, APP_VERSION
 from .api import CabecerasSeguridad, LimiteCuerpoPeticion
 from .csrf import ProteccionCSRF
 
@@ -37,9 +39,9 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(
-    title="PlumA",
+    title=APP_NAME,
     description="Descripción asistida por IA según normas del CIA",
-    version="0.3.0-alpha",
+    version=APP_VERSION,
     lifespan=lifespan,
     docs_url=None,
     redoc_url=None,
@@ -56,6 +58,8 @@ app.add_middleware(ProteccionCSRF)
 # Último middleware registrado = primero en recibir la petición. El límite
 # de cuerpo debe actuar antes del parseo multipart/JSON de FastAPI.
 app.add_middleware(LimiteCuerpoPeticion)
+# Defensa adicional para evitar exposición accidental fuera de localhost.
+app.add_middleware(ProteccionAccesoLocal)
 
 app.include_router(api.router, prefix="/api")
 

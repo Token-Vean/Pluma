@@ -89,3 +89,19 @@ def test_prompt_respeta_idioma_salida():
     assert "Idioma de salida de la descripción: inglés." in prompt
     assert "Redacta los valores propuestos en inglés" in prompt
     assert 'Mantén los valores de "confianza" exactamente como "alta", "media" o' in prompt
+
+
+def test_csv_sanea_formula_con_espacios():
+    from app.exportadores import _sanear_csv
+
+    assert _sanear_csv("   =2+2").startswith("'")
+    assert _sanear_csv("\t=2+2").startswith("'")
+
+
+def test_router_usa_misma_variable_de_sandbox():
+    import inspect
+    from app import parser_sandbox, router
+
+    assert "_PLUMA_SANDBOX_CHILD" in inspect.getsource(parser_sandbox)
+    assert "_PLUMA_SANDBOX_CHILD" in inspect.getsource(router.procesar)
+    assert "_ASISTENTE_ARCHIVISTICO_SANDBOX_CHILD" not in inspect.getsource(router.procesar)

@@ -14,9 +14,11 @@ escaneada, texto), el asistente propone valores para los campos de las
 normas internacionales del Consejo Internacional de Archivos:
 
 - **ISAD(G)** — descripción archivística
+- **DACS** — Describing Archives: A Content Standard (norma anglosajona)
 - **ISAAR(CPF)** — registros de autoridad
 - **ISDF** — descripción de funciones
 - **ISDIAH** — instituciones que custodian fondos
+- **RIC simplificado** — Records in Contexts (versión inicial; entidades aisladas Record / RecordSet / Agent / Activity, sin grafo)
 
 El archivero revisa las propuestas, corrige lo que haga falta y copia
 los valores a su sistema descriptivo habitual (ArchivesSpace, AtoM,
@@ -129,7 +131,7 @@ auditoría formal, integraciones avanzadas y soporte.
 
 ## Estado del proyecto
 
-Versión 0.3.0-alpha — alpha pública. No apto todavía para
+Versión 0.4.1-alpha — alpha pública. No apto todavía para
 entornos de producción. Las pruebas institucionales son bienvenidas
 por contacto directo.
 
@@ -202,7 +204,7 @@ El modelo base por defecto es `gemma4:e2b`. Puede cambiarse en `.env` mediante `
 
 ## Estado del proyecto
 
-**Versión 0.3.0-alpha — alpha pública.** Esta versión está pensada
+**Versión 0.4.1-alpha — alpha pública.** Esta versión está pensada
 para evaluación por archiveros, formación, demostraciones y entornos
 de prueba controlados. **No es apta para producción** sin auditoría
 previa y sin las acciones que se describen en `SECURITY_HARDENING.md`
@@ -239,3 +241,10 @@ Esta licencia permite usar, modificar y redistribuir el software
 libremente, incluso comercialmente, con la condición de que cualquier
 modificación sustancial que se ofrezca como servicio en red debe
 hacerse también disponible bajo la misma licencia.
+
+
+## Ficha técnica del proceso
+
+Desde la versión 0.4.1-alpha, cada análisis incorpora una ficha técnica ligera de auditoría. La ficha no incluye el texto del documento ni los valores descriptivos propuestos: recoge metadatos de proceso, versión de PlumA, norma usada, ruta de procesamiento, estado del sandbox de parsers, hash SHA-256 del fichero y recuento de evidencias localizadas, no localizadas o no verificables textualmente.
+
+Esta ficha mejora la trazabilidad técnica del proceso, pero no sustituye la revisión profesional del archivero ni una auditoría formal de seguridad.

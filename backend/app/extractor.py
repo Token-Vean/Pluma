@@ -32,6 +32,7 @@ logger = logging.getLogger(__name__)
 Extraibilidad = Literal["si", "parcial", "no"]
 TipoCampo = Literal["texto", "fecha", "lista"]
 Confianza = Literal["alta", "media", "baja"]
+EstadoEvidencia = Literal["localizada", "no_localizada", "no_verificable", "sin_evidencia", "sin_valor"]
 
 MAX_LONGITUD_VALOR = int(os.getenv("MAX_LONGITUD_VALOR_LLM", "50000"))
 MAX_LONGITUD_EVIDENCIA = int(os.getenv("MAX_LONGITUD_EVIDENCIA_LLM", "4000"))
@@ -63,6 +64,8 @@ class ElementoEsquema:
     valor_por_defecto: Any = None
     ead: str | None = None
     eac: str | None = None
+    area_id: str | None = None
+    area_nombre: str | None = None
 
 
 @dataclass
@@ -102,6 +105,10 @@ class CampoPropuesto:
     span: tuple[int, int] | None
     extraible: Extraibilidad
     editable: bool = True
+    estado_evidencia: EstadoEvidencia = "sin_evidencia"
+    obligatorio: bool = False
+    area_id: str | None = None
+    area_nombre: str | None = None
 
 
 @dataclass
@@ -121,37 +128,79 @@ class Propuesta:
 # Carga de esquemas
 # =============================================================================
 
-_cache_esquemas: dict[Path, Esquema] = {}
+_cache_esquemas: dict[tuple[Path, str | None], Esquema] = {}
 
 
-def cargar_esquema(ruta: str | Path) -> Esquema:
-    """Carga un YAML de norma. Cacheado: los esquemas no cambian en runtime."""
+def cargar_esquema(ruta: str | Path, perfil: str | None = None) -> Esquema:
+    """
+    Carga un YAML de norma. Cacheado: los esquemas no cambian en runtime.
+    
+    Para esquemas multi-perfil (RIC), se debe pasar el id del perfil
+    (record, recordset, agent, activity). Para esquemas tradicionales
+    (ISAD, DACS, ISAAR, etc.), `perfil` se ignora.
+    """
     ruta = Path(ruta)
-    if ruta in _cache_esquemas:
-        return _cache_esquemas[ruta]
+    clave_cache = (ruta, perfil)
+    if clave_cache in _cache_esquemas:
+        return _cache_esquemas[clave_cache]
 
     with ruta.open("r", encoding="utf-8") as f:
         data = yaml.safe_load(f)
 
-    if not isinstance(data, dict) or not isinstance(data.get("areas"), list):
+    if not isinstance(data, dict):
         raise ValueError(f"Esquema YAML inválido: {ruta}")
 
+    es_multi_perfil = data.get("multi_perfil", False) and "perfiles" in data
+    
+    if es_multi_perfil:
+        if perfil is None:
+            raise ValueError(
+                f"El esquema {ruta.name} requiere especificar un perfil. "
+                f"Perfiles disponibles: {[p['id'] for p in data['perfiles']]}"
+            )
+        # Buscar el perfil pedido
+        perfil_data = None
+        for p in data["perfiles"]:
+            if p.get("id") == perfil:
+                perfil_data = p
+                break
+        if perfil_data is None:
+            disponibles = [p["id"] for p in data["perfiles"]]
+            raise ValueError(
+                f"Perfil '{perfil}' no encontrado en {ruta.name}. "
+                f"Disponibles: {disponibles}"
+            )
+        areas = perfil_data.get("areas", [])
+        # El nombre se compone con el del perfil para que aparezca claro
+        # en la UI y los exports
+        nombre_norma = f"{data['norma']} - {perfil_data['nombre']}"
+    else:
+        if not isinstance(data.get("areas"), list):
+            raise ValueError(f"Esquema YAML sin 'areas' ni 'perfiles': {ruta}")
+        areas = data["areas"]
+        nombre_norma = str(data["norma"])
+
     elementos: list[ElementoEsquema] = []
-    for area in data["areas"]:
+    for area in areas:
         if not isinstance(area, dict):
             continue
+        area_id = str(area.get("id") or "") or None
+        area_nombre = str(area.get("nombre") or "") or None
         for el in area.get("elementos", []):
             if isinstance(el, dict):
-                elementos.append(ElementoEsquema(**el))
+                el_data = dict(el)
+                el_data["area_id"] = area_id
+                el_data["area_nombre"] = area_nombre
+                elementos.append(ElementoEsquema(**el_data))
 
     esquema = Esquema(
-        norma=str(data["norma"]),
+        norma=nombre_norma,
         version=str(data["version"]),
         nombre=str(data["nombre"]),
         idioma=str(data["idioma"]),
         elementos=elementos,
     )
-    _cache_esquemas[ruta] = esquema
+    _cache_esquemas[clave_cache] = esquema
     return esquema
 
 
@@ -320,6 +369,10 @@ def parsear_respuesta(
             evidencia=evidencia if valor is not None else None,
             span=None,
             extraible=el.extraible,
+            estado_evidencia="sin_valor" if valor is None else ("sin_evidencia" if evidencia is None else "no_verificable"),
+            obligatorio=el.obligatorio,
+            area_id=el.area_id,
+            area_nombre=el.area_nombre,
         ))
 
     return propuestos, advertencias
@@ -410,12 +463,20 @@ def _validar_evidencia(evidencia: Any) -> tuple[str | None, str | None]:
 # =============================================================================
 
 def localizar_spans(campos: list[CampoPropuesto], texto: str | None) -> list[CampoPropuesto]:
-    if not texto:
-        return campos
+    """Localiza evidencias y marca su verificabilidad textual."""
     for c in campos:
+        if c.valor in (None, "", []):
+            c.estado_evidencia = "sin_valor"
+            continue
         if not c.evidencia:
+            c.estado_evidencia = "sin_evidencia"
+            continue
+        if not texto:
+            c.span = None
+            c.estado_evidencia = "no_verificable"
             continue
         c.span = _buscar_span(c.evidencia, texto)
+        c.estado_evidencia = "localizada" if c.span is not None else "no_localizada"
     return campos
 
 
@@ -468,6 +529,10 @@ def aplicar_defaults(esquema: Esquema, propuestos: list[CampoPropuesto]) -> list
             evidencia=None,
             span=None,
             extraible="no",
+            estado_evidencia="sin_evidencia" if valor not in (None, "", []) else "sin_valor",
+            obligatorio=el.obligatorio,
+            area_id=el.area_id,
+            area_nombre=el.area_nombre,
         ))
 
     orden = {el.clave: i for i, el in enumerate(esquema.elementos)}
@@ -522,12 +587,26 @@ async def extraer(
 
     if entrada.texto:
         for campo in propuestos:
-            if campo.valor is not None and campo.evidencia and campo.span is None:
+            if campo.valor is not None and campo.evidencia and campo.estado_evidencia == "no_localizada":
                 campo.confianza = "baja"
                 advertencias.append(
                     f"{campo.clave}: la evidencia indicada por el modelo no se localizó "
                     "literalmente en el texto; confianza degradada a baja."
                 )
+    else:
+        hay_evidencia_visual = False
+        for campo in propuestos:
+            if campo.valor is not None and campo.evidencia:
+                hay_evidencia_visual = True
+                campo.estado_evidencia = "no_verificable"
+                if campo.confianza == "alta":
+                    campo.confianza = "media"
+        if hay_evidencia_visual:
+            advertencias.append(
+                "Documento procesado por visión: las evidencias no se pueden "
+                "verificar contra una capa textual extraída; las confianzas altas "
+                "se degradaron a media."
+            )
 
     propuestos = aplicar_defaults(esquema, propuestos)
 

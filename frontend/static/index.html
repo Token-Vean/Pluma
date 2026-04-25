@@ -24,7 +24,7 @@
     <img class="marca-logo" src="img/pluma-logo-header.png"
          alt="PlumA" width="auto" height="40">
     <div class="marca-texto">
-      <div class="marca-subtitulo" data-i18n="brand.subtitle">AI Assistant for Archival Description · v0.3.0-alpha</div>
+      <div class="marca-subtitulo" data-i18n="brand.subtitle">AI Assistant for Archival Description · v0.4.1-alpha</div>
     </div>
   </div>
 
@@ -158,6 +158,7 @@
         <div class="modos" id="selector-modo">
           <button class="modo activo" data-modo="esencial" data-i18n="mode.essential">Esencial</button>
           <button class="modo" data-modo="completo" data-i18n="mode.complete">Completo</button>
+          <button class="modo" id="boton-personalizar" data-i18n="custom.button" title="Filtrar campos a mostrar y exportar" data-i18n-title="custom.title">Personalizar campos</button>
         </div>
       </div>
 
@@ -182,6 +183,15 @@
     </div>
 
     <div id="advertencias"></div>
+
+    <section class="ficha-auditoria" id="ficha-auditoria" style="display: none;">
+      <button class="ficha-auditoria-cabecera" id="ficha-auditoria-toggle" type="button">
+        <span class="ficha-auditoria-titulo" data-i18n="audit.title">Ficha técnica del proceso</span>
+        <span class="ficha-auditoria-resumen mono" id="ficha-auditoria-resumen">—</span>
+      </button>
+      <div class="ficha-auditoria-detalle" id="ficha-auditoria-detalle" style="display: none;"></div>
+    </section>
+
     <div id="lista-campos"></div>
 
     <div class="mostrar-ocultos" id="mostrar-ocultos" style="display: none;">
@@ -216,6 +226,13 @@
       </svg>
       JSON
     </button>
+    <button class="boton" id="boton-exportar-auditoria" title="Descargar ficha técnica del proceso" data-i18n-title="audit.downloadTitle">
+      <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 2.5 L13 2.5 L13 13.5 L3 13.5 Z"/>
+        <path d="M5 6 L11 6 M5 8.5 L11 8.5 M5 11 L9 11"/>
+      </svg>
+      Auditoría
+    </button>
     <button class="boton" id="boton-exportar-csv" title="Descargar como CSV (compatible con Excel)" data-i18n-title="export.csv">
       <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
         <rect x="2" y="2" width="12" height="12"/>
@@ -237,6 +254,17 @@
         <path d="M3 14 C 3 10 5 9 8 9 C 11 9 13 10 13 14"/>
       </svg>
       EAC-CPF
+    </button>
+    <button class="boton" id="boton-exportar-turtle" title="Descargar como RDF/Turtle (solo RIC)" data-i18n-title="export.turtle.title">
+      <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="4" cy="4" r="1.5"/>
+        <circle cx="12" cy="4" r="1.5"/>
+        <circle cx="8" cy="12" r="1.5"/>
+        <line x1="5" y1="5" x2="7" y2="11"/>
+        <line x1="11" y1="5" x2="9" y2="11"/>
+        <line x1="5.5" y1="4" x2="10.5" y2="4"/>
+      </svg>
+      Turtle
     </button>
   </div>
 </footer>
@@ -280,8 +308,34 @@
       </button>
     </div>
     <div class="campo-evidencia" style="display: none;"></div>
+    <div class="campo-evidencia-estado" style="display: none;"></div>
   </div>
 </template>
+
+<!-- =========================================================================
+     MODAL DE PERSONALIZACIÓN DE CAMPOS
+     ====================================================================== -->
+<div class="modal-overlay" id="modal-personalizar" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="modal-personalizar-titulo">
+  <div class="modal-contenido">
+    <header class="modal-cabecera">
+      <h2 class="serif" id="modal-personalizar-titulo" data-i18n="custom.title">Selección de campos a mostrar y exportar</h2>
+      <button class="modal-cerrar" id="modal-cerrar" aria-label="Cerrar">×</button>
+    </header>
+    <div class="modal-cuerpo">
+      <p class="modal-descripcion" data-i18n="custom.description">Elige qué campos quieres mantener visibles. Esto solo afecta a lo que ves y exportas; el documento ya está procesado.</p>
+      <div class="modal-acciones-rapidas">
+        <button class="boton boton-pequeno" id="modal-todos" data-i18n="custom.selectAll">Seleccionar todos</button>
+        <button class="boton boton-pequeno" id="modal-ninguno" data-i18n="custom.selectNone">Deseleccionar todos</button>
+        <button class="boton boton-pequeno" id="modal-esenciales" data-i18n="custom.essentialOnly">Solo esenciales</button>
+      </div>
+      <div class="modal-cuadricula" id="modal-cuadricula"></div>
+    </div>
+    <footer class="modal-pie">
+      <button class="boton" id="modal-cancelar" data-i18n="custom.cancel">Cancelar</button>
+      <button class="boton boton-primario" id="modal-aplicar" data-i18n="custom.apply">Aplicar</button>
+    </footer>
+  </div>
+</div>
 
 <script src="app.js" defer></script>
 </body>

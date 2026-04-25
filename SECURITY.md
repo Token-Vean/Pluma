@@ -12,9 +12,8 @@ versión publicada recibe parches de seguridad.
 
 | Versión    | Estado                      |
 |------------|-----------------------------|
-| 0.2.x      | Soporte activo (alpha)      |
-| 0.1.x      | Sin soporte                 |
-| < 0.1.0    | Sin soporte                 |
+| 0.4.x      | Soporte activo (alpha)      |
+| 0.3.x y anteriores | Sin soporte          |
 
 ## Cómo reportar una vulnerabilidad
 
@@ -106,8 +105,8 @@ Construye y envía prompts al modelo de IA. Riesgos:
 
 Superficie expuesta al navegador. Riesgos:
 
-- CSRF (mitigado porque la aplicación bind a 127.0.0.1 y no hay
-  autenticación persistente).
+- CSRF (mitigado por Origin/Referer + token local) y exposición accidental
+  fuera de localhost (mitigada por comprobación de Host salvo opt-in explícito).
 - Content-Type confusion en subidas.
 - Exfiltración de logs si contuvieran contenido del documento (el
   logging deliberadamente NO registra contenido, solo metadatos).
