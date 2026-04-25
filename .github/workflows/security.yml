@@ -1,0 +1,62 @@
+name: security-checks
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  python-security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install ruff pytest pip-audit
+
+      - name: Lint with Ruff
+        working-directory: backend
+        run: ruff check app ../tests
+
+      - name: Run tests
+        working-directory: backend
+        env:
+          USAR_SANDBOX_PARSERS: 'false'
+        run: pytest ../tests -q
+
+      - name: Audit Python dependencies
+        working-directory: backend
+        run: pip-audit -r requirements.txt
+
+  docker-security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build application image
+        run: docker build -t pluma-app:ci ./backend
+
+      - name: Scan image with Trivy
+        uses: aquasecurity/trivy-action@0.29.0
+        with:
+          image-ref: pluma-app:ci
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          severity: CRITICAL,HIGH
+
+      - name: Check release package does not include .env
+        run: |
+          if find . -name .env -print -quit | grep -q .; then
+            echo "ERROR: .env no debe estar en el repositorio ni en el paquete de release"
+            exit 1
+          fi
