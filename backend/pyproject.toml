@@ -70,8 +70,9 @@ select = [
 ]
 ignore = [
     "E501",  # longitud de línea: la legibilidad prevalece en prompts largos y mensajes
+    "I001",  # orden de imports: no debe bloquear CI; se corrige manualmente antes de release
     "B008",  # FastAPI usa File()/Form() en defaults por diseño
-    "B904",  # en endpoints FastAPI preferimos ocultar trazas internas con HTTPException simple
+    "B904",  # endpoints FastAPI: se ocultan trazas internas mediante HTTPException
     "F841",  # variables de ElementTree creadas por legibilidad en exportadores XML
     "E741",  # nombres breves en comprensiones internas sin impacto funcional
 ]

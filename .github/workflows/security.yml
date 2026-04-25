@@ -10,21 +10,17 @@ permissions:
   contents: read
 
 env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
   python-security:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v6
+      - uses: actions/checkout@v6
 
-      - name: Set up Python
-        uses: actions/setup-python@v6
+      - uses: actions/setup-python@v6
         with:
-          python-version: '3.12'
-          cache: 'pip'
-          cache-dependency-path: backend/requirements.txt
+          python-version: "3.12"
 
       - name: Install dependencies
         working-directory: backend
@@ -40,33 +36,24 @@ jobs:
       - name: Run tests
         working-directory: backend
         env:
-          USAR_SANDBOX_PARSERS: 'false'
+          USAR_SANDBOX_PARSERS: "false"
         run: pytest ../tests -q
 
       - name: Audit Python dependencies
         working-directory: backend
-        run: pip-audit -r requirements.txt --progress-spinner off
+        run: pip-audit -r requirements.txt
 
   docker-security:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v6
+      - uses: actions/checkout@v6
 
       - name: Build application image
         run: docker build -t pluma-app:ci ./backend
 
-      - name: Scan image with Trivy
+      - name: Scan image with Trivy container
         run: |
-          docker run --rm \
-            -v /var/run/docker.sock:/var/run/docker.sock \
-            -v "$PWD/.trivycache:/root/.cache/" \
-            aquasec/trivy:0.69.3 image \
-            --exit-code 1 \
-            --ignore-unfixed \
-            --severity CRITICAL,HIGH \
-            --no-progress \
-            pluma-app:ci
+          docker run --rm             -v /var/run/docker.sock:/var/run/docker.sock             -v "$HOME/.cache/trivy:/root/.cache"             aquasec/trivy:0.69.3             image --exit-code 1 --ignore-unfixed --severity CRITICAL,HIGH pluma-app:ci
 
       - name: Check release package does not include .env
         run: |
