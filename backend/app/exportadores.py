@@ -80,7 +80,7 @@ def _limpiar_valor_exportacion(valor: Any) -> Any:
 
 def _obtener_valor(campos: list[dict], clave: str) -> Any:
     """Busca el valor de un campo por su clave en la lista de propuestos.
-    
+
     Reconoce alias entre normas equivalentes (DACS <-> ISAD) para que el
     exportador EAD funcione tanto con ISAD-G como con DACS sin duplicar
     la lógica de mapeo a EAD3.
@@ -111,18 +111,18 @@ def _obtener_valor(campos: list[dict], clave: str) -> Any:
         "notas": ["general_note"],
         "general_note": ["notas"],
     }
-    
+
     # Búsqueda directa
     for c in campos:
         if c.get("clave") == clave:
             return _limpiar_valor_exportacion(c.get("valor"))
-    
+
     # Búsqueda por alias
     for alt in alias.get(clave, []):
         for c in campos:
             if c.get("clave") == alt:
                 return _limpiar_valor_exportacion(c.get("valor"))
-    
+
     return None
 
 
@@ -684,7 +684,7 @@ RDFS_NS = "http://www.w3.org/2000/01/rdf-schema#"
 
 def _escape_turtle_literal(texto: str) -> str:
     """Escapa una cadena para usarla como literal Turtle.
-    
+
     Reglas Turtle (W3C Rec 2014):
       - " y \\ deben escaparse.
       - Tab, LF, CR como \\t \\n \\r si queremos one-line literal.
@@ -730,7 +730,7 @@ def exportar_turtle(propuesta: dict, ruta_esquema: Path,
     """
     Genera un fichero RDF/Turtle compatible con RIC-O 1.0 a partir de
     una propuesta RIC simplificada.
-    
+
     Solo se exporta UNA entidad por fichero (la propia descrita). Las
     relaciones a otras entidades RIC se podrán expresar en versiones
     futuras; en esta versión, los nombres de productores/agentes
@@ -780,7 +780,7 @@ def exportar_turtle(propuesta: dict, ruta_esquema: Path,
         sujeto_local = f"pluma-{_timestamp()}"
 
     lineas = []
-    
+
     # Cabecera: prefijos
     lineas.append("@prefix rico: <https://www.ica.org/standards/RiC/ontology#> .")
     lineas.append("@prefix rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .")
@@ -788,19 +788,19 @@ def exportar_turtle(propuesta: dict, ruta_esquema: Path,
     lineas.append("@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .")
     lineas.append("@prefix :     <urn:pluma:export#> .")
     lineas.append("")
-    
+
     # Cabecera de comentario
     fecha_gen = datetime.now().isoformat(timespec="seconds")
     lineas.append(f"# Generado por PlumA — {fecha_gen}")
     lineas.append(f"# Norma: RIC simplificado, perfil: {clase}")
-    lineas.append(f"# IMPORTANTE: esta exportación describe UNA ÚNICA entidad RIC.")
-    lineas.append(f"# Las relaciones a otros Records/Agents/Activities deben")
-    lineas.append(f"# añadirse posteriormente en una herramienta nativa RIC.")
+    lineas.append("# IMPORTANTE: esta exportación describe UNA ÚNICA entidad RIC.")
+    lineas.append("# Las relaciones a otros Records/Agents/Activities deben")
+    lineas.append("# añadirse posteriormente en una herramienta nativa RIC.")
     lineas.append("")
-    
+
     # Sujeto principal
     lineas.append(f":{sujeto_local} a rico:{clase} ;")
-    
+
     # Propiedades del sujeto
     triples_pendientes = []
     for c in campos:
@@ -810,17 +810,17 @@ def exportar_turtle(propuesta: dict, ruta_esquema: Path,
             continue
         if clave not in iris_propiedades:
             continue  # campo no mapeado; lo ignoramos
-        
+
         iri = iris_propiedades[clave]
         if not _iri_turtle_seguro(iri):
             continue
         valores = _valor_como_lista(valor)
-        
+
         for v in valores:
             v_str = str(v).strip()
             if not v_str:
                 continue
-            
+
             # Las fechas ISO se tipan como xsd:date o xsd:gYear
             if _es_fecha_iso(v_str):
                 if "/" in v_str:
@@ -836,26 +836,26 @@ def exportar_turtle(propuesta: dict, ruta_esquema: Path,
                         literal = f'"{v_str}"^^xsd:date'
             else:
                 literal = _escape_turtle_literal(v_str)
-            
+
             triples_pendientes.append((iri, literal))
-    
+
     # Escribir las triples con el último cerrando con punto
     for i, (iri, literal) in enumerate(triples_pendientes):
         terminator = " ." if i == len(triples_pendientes) - 1 else " ;"
         lineas.append(f"    {iri} {literal}{terminator}")
-    
+
     # Si no hay propiedades, cerrar con un rdfs:comment vacío
     if not triples_pendientes:
         # Sustituir el ; del sujeto principal por .
         lineas[-1] = lineas[-1].rstrip(";").rstrip() + "."
-    
+
     contenido = "\n".join(lineas).encode("utf-8") + b"\n"
-    
+
     nombre_titulo = _obtener_valor(campos, "name") or sujeto_local
     if isinstance(nombre_titulo, list):
         nombre_titulo = nombre_titulo[0] if nombre_titulo else "ric-entity"
     nombre = f"{_slug(str(nombre_titulo))}-{clase.lower()}-{_timestamp()}.ttl"
-    
+
     return contenido, "text/turtle; charset=utf-8", nombre
 
 

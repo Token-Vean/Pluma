@@ -152,7 +152,7 @@ def test_ric_record_exporta_a_turtle_valido():
 def test_ric_turtle_es_parseable_por_rdflib():
     """El Turtle generado debe ser parseable por una librería RDF estándar."""
     rdflib = pytest.importorskip("rdflib")
-    
+
     propuesta = _propuesta_ric_record()
     contenido, _, _ = exportadores.exportar(
         "turtle", propuesta, "ric-record", DIR_SCHEMAS / "ric.yaml",
@@ -212,7 +212,7 @@ def test_ric_turtle_escapa_caracteres_especiales():
     # Comillas y barras deben aparecer escapadas
     assert '\\"' in texto
     assert '\\\\' in texto
-    
+
     # Y el resultado debe seguir siendo Turtle válido
     rdflib = pytest.importorskip("rdflib")
     g = rdflib.Graph()

@@ -134,7 +134,7 @@ _cache_esquemas: dict[tuple[Path, str | None], Esquema] = {}
 def cargar_esquema(ruta: str | Path, perfil: str | None = None) -> Esquema:
     """
     Carga un YAML de norma. Cacheado: los esquemas no cambian en runtime.
-    
+
     Para esquemas multi-perfil (RIC), se debe pasar el id del perfil
     (record, recordset, agent, activity). Para esquemas tradicionales
     (ISAD, DACS, ISAAR, etc.), `perfil` se ignora.
@@ -151,7 +151,7 @@ def cargar_esquema(ruta: str | Path, perfil: str | None = None) -> Esquema:
         raise ValueError(f"Esquema YAML inválido: {ruta}")
 
     es_multi_perfil = data.get("multi_perfil", False) and "perfiles" in data
-    
+
     if es_multi_perfil:
         if perfil is None:
             raise ValueError(
