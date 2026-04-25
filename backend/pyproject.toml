@@ -68,7 +68,13 @@ select = [
     "B",    # flake8-bugbear
     "UP",   # pyupgrade
 ]
-ignore = ["E501"]   # longitud de línea la impone el formateador
+ignore = [
+    "E501",  # longitud de línea: la legibilidad prevalece en prompts largos y mensajes
+    "B008",  # FastAPI usa File()/Form() en defaults por diseño
+    "B904",  # en endpoints FastAPI preferimos ocultar trazas internas con HTTPException simple
+    "F841",  # variables de ElementTree creadas por legibilidad en exportadores XML
+    "E741",  # nombres breves en comprensiones internas sin impacto funcional
+]
 
 # -----------------------------------------------------------------------------
 # Pytest

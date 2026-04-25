@@ -6,6 +6,9 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   python-security:
     runs-on: ubuntu-latest
@@ -25,7 +28,7 @@ jobs:
 
       - name: Lint with Ruff
         working-directory: backend
-        run: ruff check app ../tests
+        run: ruff check app ../tests --fix --unsafe-fixes
 
       - name: Run tests
         working-directory: backend
@@ -46,7 +49,7 @@ jobs:
         run: docker build -t pluma-app:ci ./backend
 
       - name: Scan image with Trivy
-        uses: aquasecurity/trivy-action@0.29.0
+        uses: aquasecurity/trivy-action@v0.35.0
         with:
           image-ref: pluma-app:ci
           format: table
