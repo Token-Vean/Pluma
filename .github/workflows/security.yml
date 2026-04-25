@@ -37,6 +37,7 @@ jobs:
         working-directory: backend
         env:
           USAR_SANDBOX_PARSERS: "false"
+          PYTHONPATH: ${{ github.workspace }}/backend
         run: pytest ../tests -q
 
       - name: Audit Python dependencies
@@ -53,7 +54,11 @@ jobs:
 
       - name: Scan image with Trivy container
         run: |
-          docker run --rm             -v /var/run/docker.sock:/var/run/docker.sock             -v "$HOME/.cache/trivy:/root/.cache"             aquasec/trivy:0.69.3             image --exit-code 1 --ignore-unfixed --severity CRITICAL,HIGH pluma-app:ci
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "$HOME/.cache/trivy:/root/.cache" \
+            aquasec/trivy:0.69.3 \
+            image --exit-code 1 --ignore-unfixed --severity CRITICAL,HIGH pluma-app:ci
 
       - name: Check release package does not include .env
         run: |
