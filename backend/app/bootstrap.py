@@ -27,7 +27,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import re
 from pathlib import Path
 
 import httpx
@@ -36,7 +35,7 @@ logger = logging.getLogger(__name__)
 
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 MODELO_BASE = os.getenv("MODELO_BASE", "gemma4:e2b")
-MODELO_NOMBRE = os.getenv("MODELO_NOMBRE", "pluma")
+MODELO_NOMBRE = os.getenv("MODELO_NOMBRE", "asistente-archivistico")
 MODELFILE_PATH = Path(os.getenv("MODELFILE_PATH", "/app/Modelfile"))
 PERFIL = os.getenv("PERFIL", "bundled").strip().lower()
 
@@ -58,7 +57,9 @@ def _timeout_rapido() -> httpx.Timeout:
     return httpx.Timeout(10.0)
 
 def _timeout_largo() -> httpx.Timeout:
-    return httpx.Timeout(connect=10.0, read=None, write=30.0, pool=10.0)
+    # Timeout alto pero finito: evita instalaciones colgadas indefinidamente
+    # si Ollama queda bloqueado durante pull/create.
+    return httpx.Timeout(connect=10.0, read=3600.0, write=30.0, pool=10.0)
 
 
 # =============================================================================

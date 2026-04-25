@@ -5,13 +5,15 @@ Los parsers de PDF/DOCX/imagen procesan entradas no confiables. Aunque el
 router aplica límites estrictos, esta capa ejecuta el procesamiento en un
 proceso hijo con timeout y, en sistemas POSIX, límites de memoria/CPU.
 
-Objetivo: si un parser se bloquea, consume recursos excesivos o falla de forma
-nativa, no tumba el proceso principal de FastAPI.
+El canal hijo → padre usa bytes JSON explícitos mediante send_bytes/recv_bytes.
+No usa Connection.recv(), porque recv() deserializa con pickle y debilita el
+valor del aislamiento si un parser nativo llegara a comprometer el proceso hijo.
 """
 
 from __future__ import annotations
 
 import importlib
+import json
 import multiprocessing as mp
 import os
 import time
@@ -56,7 +58,6 @@ def _aplicar_limites_recursos(timeout_segundos: int, memoria_mb: int) -> None:
         try:
             resource.setrlimit(resource.RLIMIT_AS, (limite_memoria, limite_memoria))
         except Exception:
-            # Algunos entornos no permiten RLIMIT_AS. El timeout sigue activo.
             pass
 
     if timeout_segundos > 0:
@@ -70,6 +71,11 @@ def _aplicar_limites_recursos(timeout_segundos: int, memoria_mb: int) -> None:
 def _resolver_funcion(ruta_funcion: str):
     modulo, nombre = ruta_funcion.split(":", 1)
     return getattr(importlib.import_module(modulo), nombre)
+
+
+def _enviar_json_bytes(salida, payload: dict[str, Any]) -> None:
+    datos = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    salida.send_bytes(datos)
 
 
 def _worker(
@@ -86,17 +92,20 @@ def _worker(
     try:
         funcion = _resolver_funcion(ruta_funcion)
         resultado = funcion(*args, **kwargs)
-        salida.send(("ok", resultado))
+        _enviar_json_bytes(salida, {"estado": "ok", "payload": resultado})
     except BaseException as exc:  # noqa: BLE001 - se serializa para el proceso padre
         try:
-            salida.send((
-                "error",
+            _enviar_json_bytes(
+                salida,
                 {
-                    "exception_type": exc.__class__.__name__,
-                    "message": str(exc),
-                    "traceback_text": traceback.format_exc(limit=20),
+                    "estado": "error",
+                    "payload": {
+                        "exception_type": exc.__class__.__name__,
+                        "message": str(exc),
+                        "traceback_text": traceback.format_exc(limit=20),
+                    },
                 },
-            ))
+            )
         except Exception:
             pass
     finally:
@@ -116,8 +125,8 @@ def ejecutar_en_sandbox(
     """
     Ejecuta una función top-level en un proceso hijo y devuelve su resultado.
 
-    `ruta_funcion` debe tener forma ``"app.router:_procesar_impl"`` para evitar
-    depender del pickle de objetos función entre plataformas.
+    La función debe devolver una estructura JSON-serializable. El proceso padre
+    solo decodifica JSON, no objetos Python serializados con pickle.
     """
     timeout_segundos = timeout_segundos or int(os.getenv("SANDBOX_TIMEOUT_SEGUNDOS", "90"))
     memoria_mb = memoria_mb or int(os.getenv("SANDBOX_MEMORIA_MB", "1536"))
@@ -143,7 +152,19 @@ def ejecutar_en_sandbox(
 
     while True:
         if receptor.poll(0.1):
-            estado, payload = receptor.recv()
+            try:
+                datos = receptor.recv_bytes()
+                mensaje = json.loads(datos.decode("utf-8"))
+            except Exception as exc:
+                proceso.terminate()
+                proceso.join(5)
+                receptor.close()
+                raise SandboxExecutionError(
+                    "RespuestaSandboxInvalida",
+                    f"El proceso de parser devolvió una respuesta no válida: {exc}",
+                ) from None
+            estado = mensaje.get("estado")
+            payload = mensaje.get("payload")
             proceso.join(5)
             break
 
@@ -174,6 +195,9 @@ def ejecutar_en_sandbox(
 
     if estado == "ok":
         return payload
+
+    if not isinstance(payload, dict):
+        raise SandboxExecutionError("ErrorParser", "Error no especificado en parser.")
 
     raise SandboxExecutionError(
         payload.get("exception_type", "ErrorParser"),

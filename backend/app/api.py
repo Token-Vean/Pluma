@@ -21,13 +21,13 @@ import logging
 import os
 import signal
 import uuid
+from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Any, Awaitable, Callable
+from typing import Any
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import Response
 from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from . import extractor, identificador_tipo, router as router_entrada
@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 # Configuración
 # =============================================================================
 
-MODELO = os.getenv("MODELO_NOMBRE", "pluma")
+MODELO = os.getenv("MODELO_NOMBRE", "asistente-archivistico")
 DIR_ESQUEMAS = Path(os.getenv("DIR_ESQUEMAS", "/app/schemas"))
 RUTA_CATALOGO_TIPOS = DIR_ESQUEMAS / "tipos-documentales.yaml"
 
@@ -236,7 +236,7 @@ async def listar_tipos():
     try:
         catalogo = identificador_tipo.cargar_catalogo(RUTA_CATALOGO_TIPOS)
     except FileNotFoundError:
-        raise HTTPException(500, "Catálogo de tipos no encontrado en el servidor.")
+        raise HTTPException(500, "Catálogo de tipos no encontrado en el servidor.") from None
 
     return {
         "version": catalogo.version,
@@ -314,10 +314,10 @@ async def describir(
             doc = router_entrada.procesar(contenido, fichero.filename or "sin_nombre")
         except ErrorValidacion as e:
             _log_peticion("describir_validacion_fallida", peticion_id, error=str(e))
-            raise HTTPException(400, str(e))
-        except Exception:
+            raise HTTPException(400, str(e)) from None
+        except Exception as err:
             logger.exception("[%s] Error inesperado en router", peticion_id)
-            raise HTTPException(500, "Error al procesar el fichero.")
+            raise HTTPException(500, "Error al procesar el fichero.") from err
         finally:
             # No es borrado seguro de memoria en Python; solo elimina la referencia
             # local lo antes posible. La documentación evita prometer borrado seguro.
@@ -335,7 +335,7 @@ async def describir(
         try:
             esquema = extractor.cargar_esquema(ruta_esquema)
         except FileNotFoundError:
-            raise HTTPException(500, f"Esquema de norma no disponible: {norma}")
+            raise HTTPException(500, f"Esquema de norma no disponible: {norma}") from None
 
         filtro_claves = _construir_filtro(modo, campos, norma, esquema)
 
@@ -377,9 +377,9 @@ async def describir(
                 filtro_claves=filtro_claves,
                 idioma_salida=idioma_salida,
             )
-        except Exception:
+        except Exception as err:
             logger.exception("[%s] Error en extracción", peticion_id)
-            raise HTTPException(500, "Error al generar la propuesta de descripción.")
+            raise HTTPException(500, "Error al generar la propuesta de descripción.") from err
 
         _log_peticion(
             "describir_fin",
@@ -471,10 +471,10 @@ async def exportar(formato: str, payload: dict):
             ruta_esquema=ruta_esquema,
         )
     except ValueError as e:
-        raise HTTPException(400, str(e))
-    except Exception:
+        raise HTTPException(400, str(e)) from None
+    except Exception as err:
         logger.exception("Error al generar exportación %s", formato)
-        raise HTTPException(500, f"Error al generar el fichero {formato.upper()}.")
+        raise HTTPException(500, f"Error al generar el fichero {formato.upper()}.") from err
 
     return Response(
         content=contenido,
@@ -513,7 +513,7 @@ def _validar_payload_exportacion(payload: Any) -> dict:
     try:
         tamano_logico = len(json.dumps(payload, ensure_ascii=False))
     except (TypeError, ValueError):
-        raise HTTPException(400, "Payload inválido: contiene valores no serializables.")
+        raise HTTPException(400, "Payload inválido: contiene valores no serializables.") from None
     if tamano_logico > MAX_EXPORT_BODY_BYTES:
         raise HTTPException(413, "Payload de exportación demasiado grande.")
 

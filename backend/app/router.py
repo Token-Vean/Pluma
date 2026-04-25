@@ -15,6 +15,7 @@ formato ambiguo se rechaza en lugar de enviarlo al parser documental.
 
 from __future__ import annotations
 
+import base64
 import io
 import logging
 import os
@@ -170,7 +171,7 @@ def _validar_docx_seguro(contenido: bytes) -> None:
         with zipfile.ZipFile(io.BytesIO(contenido)) as z:
             infos = z.infolist()
     except zipfile.BadZipFile:
-        raise ErrorValidacion("El documento DOCX está dañado o no es válido.")
+        raise ErrorValidacion("El documento DOCX está dañado o no es válido.") from None
 
     if not infos:
         raise ErrorValidacion("El DOCX no contiene entradas internas válidas.")
@@ -294,9 +295,9 @@ def _calidad_ocr(texto: str, num_paginas: int) -> float:
     palabras_por_pagina = len(palabras) / num_paginas
     palabras_score = min(1.0, palabras_por_pagina / 80)
 
-    lineas = [l.strip() for l in texto.split("\n") if l.strip()]
+    lineas = [linea.strip() for linea in texto.split("\n") if linea.strip()]
     if lineas:
-        cortas = sum(1 for l in lineas if len(l.split()) <= 2)
+        cortas = sum(1 for linea in lineas if len(linea.split()) <= 2)
         prop_cortas = cortas / len(lineas)
         lineas_score = max(0.0, 1.0 - max(0.0, prop_cortas - 0.4) * 2)
     else:
@@ -317,7 +318,7 @@ def _extraer_texto_pdf(contenido: bytes) -> tuple[str, int]:
     try:
         lector = pypdf.PdfReader(io.BytesIO(contenido), strict=False)
     except Exception as e:
-        raise ErrorValidacion(f"El PDF no se puede abrir: {e}")
+        raise ErrorValidacion(f"El PDF no se puede abrir: {e}") from None
 
     if lector.is_encrypted:
         raise ErrorValidacion("El PDF está cifrado o protegido por contraseña.")
@@ -351,7 +352,7 @@ def _pdf_a_imagenes(contenido: bytes, max_paginas: int = PAGINAS_PDF_VISION_MAX)
     try:
         pdf = pdfium.PdfDocument(contenido)
     except Exception as e:
-        raise ErrorValidacion(f"El PDF no se puede abrir para renderizado: {e}")
+        raise ErrorValidacion(f"El PDF no se puede abrir para renderizado: {e}") from None
 
     try:
         paginas_a_procesar = min(len(pdf), max_paginas)
@@ -410,7 +411,7 @@ def _extraer_texto_docx(contenido: bytes) -> str:
     try:
         doc = Document(io.BytesIO(contenido))
     except Exception as e:
-        raise ErrorValidacion(f"El DOCX no se puede abrir: {e}")
+        raise ErrorValidacion(f"El DOCX no se puede abrir: {e}") from None
 
     partes = [p.text for p in doc.paragraphs if p.text.strip()]
     for tabla in doc.tables:
@@ -483,7 +484,7 @@ def _validar_imagen(contenido: bytes) -> bytes:
     except ErrorValidacion:
         raise
     except Exception as e:
-        raise ErrorValidacion(f"La imagen no es válida o está dañada: {e}")
+        raise ErrorValidacion(f"La imagen no es válida o está dañada: {e}") from None
 
 
 def _limpiar_texto(texto: str) -> str:
@@ -496,6 +497,50 @@ def _limpiar_texto(texto: str) -> str:
     limpio = "".join(c for c in texto if c.isprintable() or c in "\n\t\r")
     limpio = re.sub(r"\n{4,}", "\n\n\n", limpio)
     return limpio.strip()
+
+
+# =============================================================================
+# Serialización segura del resultado del sandbox
+# =============================================================================
+
+def _documento_a_payload(doc: DocumentoProcesado) -> dict:
+    return {
+        "entrada": {
+            "texto": doc.entrada.texto,
+            "imagenes": [base64.b64encode(img).decode("ascii") for img in (doc.entrada.imagenes or [])],
+            "plantilla": doc.entrada.plantilla,
+            "instrucciones_tipo": doc.entrada.instrucciones_tipo,
+        },
+        "ruta": doc.ruta,
+        "nombre_original": doc.nombre_original,
+        "tipo_mime": doc.tipo_mime,
+        "tamano_bytes": doc.tamano_bytes,
+        "paginas": doc.paginas,
+    }
+
+
+def _documento_desde_payload(payload: dict) -> DocumentoProcesado:
+    entrada_payload = payload.get("entrada", {})
+    imagenes_b64 = entrada_payload.get("imagenes") or []
+    imagenes = [base64.b64decode(img) for img in imagenes_b64]
+    return DocumentoProcesado(
+        entrada=Entrada(
+            texto=entrada_payload.get("texto"),
+            imagenes=imagenes or None,
+            plantilla=entrada_payload.get("plantilla"),
+            instrucciones_tipo=entrada_payload.get("instrucciones_tipo") or {},
+        ),
+        ruta=payload["ruta"],
+        nombre_original=payload["nombre_original"],
+        tipo_mime=payload["tipo_mime"],
+        tamano_bytes=int(payload["tamano_bytes"]),
+        paginas=payload.get("paginas"),
+    )
+
+
+def _procesar_impl_serializable(contenido: bytes, nombre: str) -> dict:
+    """Versión serializable para el sandbox: no devuelve objetos Python."""
+    return _documento_a_payload(_procesar_impl(contenido, nombre))
 
 
 # =============================================================================
@@ -553,7 +598,7 @@ def _procesar_impl(contenido: bytes, nombre: str) -> DocumentoProcesado:
                 raise ErrorValidacion(
                     f"El PDF no tiene texto legible y no se pudo convertir "
                     f"a imagen para procesamiento visual: {e}"
-                )
+                ) from None
 
     elif familia == "docx":
         texto = _limpiar_texto(_extraer_texto_docx(contenido))
@@ -606,10 +651,13 @@ def procesar(contenido: bytes, nombre: str) -> DocumentoProcesado:
     """
     if (
         sandbox_activo()
-        and os.getenv("_PLUMA_SANDBOX_CHILD") != "1"
+        and os.getenv("_ASISTENTE_ARCHIVISTICO_SANDBOX_CHILD") != "1"
     ):
         try:
-            return ejecutar_en_sandbox("app.router:_procesar_impl", contenido, nombre)
+            payload = ejecutar_en_sandbox("app.router:_procesar_impl_serializable", contenido, nombre)
+            if not isinstance(payload, dict):
+                raise ErrorValidacion("El parser aislado devolvió una respuesta inválida.")
+            return _documento_desde_payload(payload)
         except SandboxExecutionError as exc:
             # Preservar mensajes funcionales de validación y ocultar trazas internas.
             if exc.exception_type == "ErrorValidacion":

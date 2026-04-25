@@ -1,5 +1,5 @@
 """
-Exportadores del PlumA.
+Exportadores del Asistente Archivístico.
 
 Cada exportador toma una propuesta editada (el JSON que la UI envía al
 backend después de que el archivero haya revisado y corregido) y devuelve:
@@ -35,8 +35,8 @@ import unicodedata
 from datetime import datetime
 from pathlib import Path
 from typing import Any
-from xml.etree.ElementTree import Element, SubElement, register_namespace, tostring
 from xml.dom import minidom
+from xml.etree.ElementTree import Element, SubElement, register_namespace, tostring
 
 import yaml
 
@@ -236,7 +236,7 @@ def exportar_ead(propuesta: dict, ruta_esquema: Path) -> tuple[bytes, str, str]:
     en AtoM (vía "Import XML → EAD 2002 / 3") y en ArchivesSpace.
     """
     campos = propuesta["propuesta"]["campos"]
-    mapeo = _cargar_mapeo(ruta_esquema)
+    _cargar_mapeo(ruta_esquema)
 
     # Raíz EAD
     ead = Element("ead", {
@@ -259,9 +259,9 @@ def exportar_ead(propuesta: dict, ruta_esquema: Path) -> tuple[bytes, str, str]:
     titleproper.text = _obtener_valor(campos, "titulo") or "Descripción archivística"
 
     # maintenancestatus / maintenanceagency (obligatorios en EAD3)
-    mstatus = SubElement(control, "maintenancestatus", {"value": "new"})
+    SubElement(control, "maintenancestatus", {"value": "new"})
     magency = SubElement(control, "maintenanceagency")
-    SubElement(magency, "agencyname").text = "PlumA (borrador)"
+    SubElement(magency, "agencyname").text = "Asistente Archivístico (borrador)"
 
     # languagedeclaration
     langs = _valor_como_lista(_obtener_valor(campos, "lengua_escritura"))
@@ -275,8 +275,8 @@ def exportar_ead(propuesta: dict, ruta_esquema: Path) -> tuple[bytes, str, str]:
     mevent = SubElement(mhistory, "maintenanceevent")
     SubElement(mevent, "eventtype", {"value": "created"})
     SubElement(mevent, "eventdatetime").text = datetime.now().isoformat(timespec="seconds")
-    agenttype = SubElement(mevent, "agenttype", {"value": "machine"})
-    SubElement(mevent, "agent").text = "PlumA v0.2"
+    SubElement(mevent, "agenttype", {"value": "machine"})
+    SubElement(mevent, "agent").text = "Asistente Archivístico v0.2"
 
     # archdesc: la descripción propiamente dicha
     nivel = _obtener_valor(campos, "nivel_descripcion") or "item"
@@ -463,7 +463,7 @@ def exportar_eac_cpf(propuesta: dict, ruta_esquema: Path) -> tuple[bytes, str, s
     Solo aplica a ISAAR(CPF).
     """
     campos = propuesta["propuesta"]["campos"]
-    mapeo = _cargar_mapeo(ruta_esquema)
+    _cargar_mapeo(ruta_esquema)
 
     eac = Element("eac-cpf", {
         "xmlns": EAC_NS,
@@ -480,7 +480,7 @@ def exportar_eac_cpf(propuesta: dict, ruta_esquema: Path) -> tuple[bytes, str, s
     mstatus.text = _obtener_valor(campos, "estado_elaboracion") or "new"
 
     magency = SubElement(control, "maintenanceAgency")
-    SubElement(magency, "agencyName").text = "PlumA (borrador)"
+    SubElement(magency, "agencyName").text = "Asistente Archivístico (borrador)"
 
     # languageDeclaration
     langs = _valor_como_lista(_obtener_valor(campos, "lenguas_escrituras")) or ["spa"]
@@ -498,7 +498,7 @@ def exportar_eac_cpf(propuesta: dict, ruta_esquema: Path) -> tuple[bytes, str, s
     SubElement(mevent, "eventType").text = "created"
     SubElement(mevent, "eventDateTime").text = datetime.now().isoformat(timespec="seconds")
     SubElement(mevent, "agentType").text = "machine"
-    SubElement(mevent, "agent").text = "PlumA v0.2"
+    SubElement(mevent, "agent").text = "Asistente Archivístico v0.2"
 
     # Fuentes
     fuentes = _valor_como_lista(_obtener_valor(campos, "fuentes"))
