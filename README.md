@@ -137,7 +137,7 @@ por contacto directo.
 
 ## Autor
 
-Víctor Villapalos Sánchez.
+Víctor Villapalos.
 
 
 ## Endurecimiento aplicado en esta versión
