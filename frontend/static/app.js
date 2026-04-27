@@ -1137,35 +1137,60 @@ function descargarAuditoria() {
    ========================================================================== */
 
 async function copiarTexto(boton, texto) {
+  const doc = (boton && boton.ownerDocument) ? boton.ownerDocument : document;
+  const win = (doc && doc.defaultView) ? doc.defaultView : window;
+
   if (!texto) {
-    toast(t('copy.empty'));
+    toast(t('copy.empty'), '', doc);
     return;
   }
-  try {
-    await navigator.clipboard.writeText(texto);
+
+  const marcarComoCopiado = () => {
     boton.classList.add('copiado');
-    boton.querySelector('.icono-copiar').style.display = 'none';
-    boton.querySelector('.icono-ok').style.display = 'block';
+
+    const iconoCopiar = boton.querySelector('.icono-copiar');
+    const iconoOk = boton.querySelector('.icono-ok');
+    if (iconoCopiar) iconoCopiar.style.display = 'none';
+    if (iconoOk) iconoOk.style.display = 'block';
+
     setTimeout(() => {
       boton.classList.remove('copiado');
-      boton.querySelector('.icono-copiar').style.display = 'block';
-      boton.querySelector('.icono-ok').style.display = 'none';
+      if (iconoCopiar) iconoCopiar.style.display = 'block';
+      if (iconoOk) iconoOk.style.display = 'none';
     }, 1500);
+  };
+
+  try {
+    // En modo flotante, el clic se produce en el documento Picture-in-Picture.
+    // Usar window.navigator/document del documento propietario del botón evita
+    // perder la activación de usuario al llamar al clipboard desde la ventana principal.
+    if (win.navigator && win.navigator.clipboard && win.navigator.clipboard.writeText) {
+      await win.navigator.clipboard.writeText(texto);
+      marcarComoCopiado();
+      return;
+    }
+    throw new Error('Clipboard API no disponible en este contexto');
   } catch (err) {
-    // Fallback para contextos sin permisos de clipboard (ej. HTTP sin TLS)
+    // Fallback para contextos sin permisos de clipboard (ej. HTTP sin TLS o PiP restrictivo).
     try {
-      const ta = document.createElement('textarea');
+      const ta = doc.createElement('textarea');
       ta.value = texto;
+      ta.setAttribute('readonly', '');
       ta.style.position = 'fixed';
+      ta.style.left = '-9999px';
+      ta.style.top = '0';
       ta.style.opacity = '0';
-      document.body.appendChild(ta);
+      doc.body.appendChild(ta);
+      ta.focus();
       ta.select();
-      document.execCommand('copy');
-      document.body.removeChild(ta);
-      boton.classList.add('copiado');
-      setTimeout(() => boton.classList.remove('copiado'), 1500);
-    } catch {
-      toast(t('copy.error'), 'error');
+      const ok = doc.execCommand('copy');
+      doc.body.removeChild(ta);
+
+      if (!ok) throw new Error('execCommand copy devolvió false');
+      marcarComoCopiado();
+    } catch (fallbackErr) {
+      console.error('No se pudo copiar al portapapeles:', err, fallbackErr);
+      toast(t('copy.error'), 'error', doc);
     }
   }
 }
@@ -1536,11 +1561,19 @@ function inicializarModoFlotante() {
    10. Toasts
    ========================================================================== */
 
-function toast(mensaje, tipo = '') {
-  const t = document.createElement('div');
+function toast(mensaje, tipo = '', doc = document) {
+  const contexto = doc || document;
+  const contenedor = contexto.getElementById('toasts') || document.getElementById('toasts');
+
+  if (!contenedor) {
+    console.warn('No se encontró el contenedor de notificaciones:', mensaje);
+    return;
+  }
+
+  const t = contexto.createElement('div');
   t.className = 'toast ' + tipo;
   t.textContent = mensaje;
-  $('toasts').appendChild(t);
+  contenedor.appendChild(t);
   setTimeout(() => t.remove(), 3500);
 }
 
