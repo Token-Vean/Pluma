@@ -137,7 +137,7 @@ por contacto directo.
 
 ## Autor
 
-Víctor Villapalos Sánchez.
+Víctor Villapalos.
 
 
 ## Endurecimiento aplicado en esta versión
@@ -219,17 +219,6 @@ Lo que se garantiza en esta versión:
 - Tests automáticos en CI con auditoría de dependencias y escaneo
   de imágenes Docker.
 - Documentación honesta sobre lo que falta (ver `KNOWN_ISSUES.md`).
-
-Lo que no se garantiza todavía:
-
-- Auditoría profesional externa.
-- Pruebas multiplataforma exhaustivas (desarrollado en Windows con
-  Docker Desktop; pendiente probar en Linux y macOS de forma
-  sistemática).
-- Fijación criptográfica de imágenes Docker por digest.
-- Texto íntegro de la AGPL-3 en el `LICENSE` (el aviso oficial sí
-  está; el texto largo debe completarse antes de etiquetar la
-  release pública).
 
 
 ## Licencia
