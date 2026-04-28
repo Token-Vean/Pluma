@@ -1,4 +1,4 @@
-﻿name: security-checks
+name: security-checks
 
 on:
   pull_request:
@@ -8,26 +8,32 @@ on:
 
 permissions:
   contents: read
-  security-events: write
 
 jobs:
   python-security:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Install audit tools
+
+      - name: Install backend and audit dependencies
         run: |
           python -m pip install --upgrade pip
+          python -m pip install -r backend/requirements.txt
           python -m pip install bandit pip-audit pytest pyyaml
-      - name: Static release configuration checks
+
+      - name: Static repository configuration checks
         run: python scripts/security_static_check.py
+
       - name: Bandit static analysis
         run: bandit -r backend/app -ll
+
       - name: pip-audit dependencies
         run: pip-audit -r backend/requirements.txt
+
       - name: Unit tests
         env:
           PYTHONPATH: backend
@@ -37,8 +43,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - name: Build local image
         run: docker compose build app
+
       - name: Trivy image scan
         uses: aquasecurity/trivy-action@v0.35.0
         with:
@@ -47,5 +55,3 @@ jobs:
           severity: 'CRITICAL,HIGH'
           ignore-unfixed: true
           exit-code: '1'
-
-

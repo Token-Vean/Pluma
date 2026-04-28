@@ -36,7 +36,6 @@ from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
 from typing import Any
-from xml.dom import minidom
 from xml.etree.ElementTree import Element, SubElement, indent, register_namespace, tostring
 
 import yaml
