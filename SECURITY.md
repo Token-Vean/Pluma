@@ -174,11 +174,16 @@ en red no están soportados sin autenticación real, TLS y controles adicionales
 
 Desde esta versión, `OLLAMA_URL` también se valida al arrancar: por defecto solo
 se permiten destinos locales (`localhost`, `127.0.0.1`, `::1`,
-`host.docker.internal` y el servicio Docker `ollama`). Para usar un endpoint
-remoto debe definirse `ALLOW_REMOTE_OLLAMA=true`, lo que implica que texto e
+el servicio Docker interno `ollama`). Para usar un endpoint
+remoto debe definirse `ALLOW_REMOTE_OLLAMA=true (solo desarrollo, sin efecto en la release pública con PLUMA_STRICT_LOCAL=true)`, lo que implica que texto e
 imágenes de documentos pueden salir del equipo.
 
 El procesamiento de PDF, DOCX e imágenes se ejecuta por defecto en un proceso
 hijo con timeout y límite de memoria en sistemas POSIX. Esto reduce el impacto
 de parsers bloqueados o documentos patológicos, pero no equivale a una garantía
 absoluta frente a ficheros maliciosos.
+
+
+## Modo local bloqueado de la release pública
+
+La release pública de PlumA fuerza `PLUMA_STRICT_LOCAL=true`, publica la interfaz solo en `127.0.0.1` y usa exclusivamente el servicio Docker interno `ollama`. El perfil `external` no se distribuye en esta variante.

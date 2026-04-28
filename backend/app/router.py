@@ -39,6 +39,7 @@ TAMANO_MAXIMO_BYTES = 50 * 1024 * 1024      # 50 MB de fichero documental
 PAGINAS_MAXIMAS_PDF = 200
 PAGINAS_PDF_HIBRIDO = 5
 PAGINAS_PDF_VISION_MAX = 20
+PDF_HIBRIDO_CON_IMAGENES = os.getenv("PLUMA_PDF_HIBRIDO_CON_IMAGENES", "false").strip().lower() in {"1", "true", "yes", "si", "sí", "on"}
 LONGITUD_MAXIMA_TEXTO = int(os.getenv("MAX_LONGITUD_TEXTO_EXTRAIDO", "800000"))
 
 # Imagen de entrada. 40 MP evita bombas razonables sin impedir escaneos
@@ -571,7 +572,7 @@ def _procesar_impl(contenido: bytes, nombre: str) -> DocumentoProcesado:
         if calidad >= 0.5:
             texto = _limpiar_texto(texto_crudo)
 
-            if paginas > PAGINAS_PDF_HIBRIDO:
+            if paginas > PAGINAS_PDF_HIBRIDO or not PDF_HIBRIDO_CON_IMAGENES:
                 ruta = "texto"
             else:
                 try:

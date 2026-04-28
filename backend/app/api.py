@@ -34,6 +34,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from . import auditoria, extractor, identificador_tipo, router as router_entrada
 from .router import ErrorValidacion
 from .version import APP_VERSION
+from .security_policy import security_status
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +43,7 @@ logger = logging.getLogger(__name__)
 # Configuración
 # =============================================================================
 
-MODELO = os.getenv("MODELO_NOMBRE", "pluma")
+MODELO = os.getenv("MODELO_NOMBRE", "pluma:0.4.16")
 DIR_ESQUEMAS = Path(os.getenv("DIR_ESQUEMAS", "/app/schemas"))
 RUTA_CATALOGO_TIPOS = DIR_ESQUEMAS / "tipos-documentales.yaml"
 
@@ -59,7 +60,7 @@ MAX_ITEMS_LISTA_EXPORTACION = int(os.getenv("MAX_ITEMS_LISTA_EXPORTACION", "100"
 MAX_PROCESAMIENTOS_SIMULTANEOS = max(
     1, int(os.getenv("MAX_PROCESAMIENTOS_SIMULTANEOS", "1"))
 )
-PERMITIR_APAGADO_UI = os.getenv("PERMITIR_APAGADO_UI", "true").strip().lower() in {
+PERMITIR_APAGADO_UI = os.getenv("PERMITIR_APAGADO_UI", "false").strip().lower() in {
     "1", "true", "yes", "si", "sí", "on"
 }
 INCLUIR_HASH_DOCUMENTO_AUDITORIA = os.getenv(
@@ -647,3 +648,9 @@ def _validar_sin_controles_peligrosos(valor: str, nombre: str, idx: int) -> None
 # Los endpoints Pro vivirán en un módulo separado y se montarán con:
 #     app.include_router(router_pro, prefix="/api/pro")
 # Nada de este fichero cambia.
+
+
+@router.get("/seguridad-local")
+async def seguridad_local():
+    """Estado efectivo del bloqueo local de la release pública."""
+    return security_status()

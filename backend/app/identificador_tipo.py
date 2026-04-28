@@ -159,13 +159,28 @@ async def detectar(
     )
 
     try:
-        respuesta = await llm.generar(
-            prompt=prompt,
-            modelo=modelo,
-            imagenes=imagenes,
-            formato_json=True,
-            temperatura=0.0,   # determinismo máximo para identificación
-        )
+        try:
+            respuesta = await llm.generar(
+                prompt=prompt,
+                modelo=modelo,
+                imagenes=imagenes,
+                formato_json=True,
+                temperatura=0.0,   # determinismo máximo para identificación
+            )
+        except Exception as e:
+            if texto and imagenes:
+                logger.warning(
+                    "Fallo en detección multimodal; reintentando solo con texto: %s", e
+                )
+                respuesta = await llm.generar(
+                    prompt=prompt,
+                    modelo=modelo,
+                    imagenes=None,
+                    formato_json=True,
+                    temperatura=0.0,
+                )
+            else:
+                raise
     except Exception as e:
         logger.warning("Fallo en detección de tipo: %s", e)
         return None

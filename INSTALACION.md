@@ -36,7 +36,7 @@ instalador descarga Ollama dentro de Docker y un modelo por defecto
 (Gemma 3 de 4 mil millones de parámetros). Todo queda aislado dentro
 de contenedores, sin interferir con el resto del sistema.
 
-- **Descarga la primera vez**: unos 4-5 GB (motor Ollama + modelo).
+- **Descarga la primera vez**: el motor Ollama y el modelo configurado en `.env`.
 - **Espacio en disco recomendado**: 8 GB libres.
 - **Desinstalación**: el script `desinstalar` elimina el motor y
   el modelo descargados sin tocar nada del sistema.
@@ -96,7 +96,7 @@ en consecuencia. No tienes que elegir nada.
 ## La primera vez
 
 - **Si no tenías Ollama**: el sistema descarga el motor y el modelo
-  (4-5 GB). Según tu conexión a Internet puede tardar varios minutos.
+  (el tamaño depende del modelo elegido). Según tu conexión a Internet puede tardar varios minutos.
   Es una operación que solo ocurre una vez. La interfaz muestra el
   progreso mientras termina; cuando aparezca "Listo para usar",
   podrás empezar a subir documentos.
@@ -158,7 +158,7 @@ carpeta manualmente después.
 
 ## Cambiar de modelo
 
-El modelo por defecto es `gemma4:e2b`. Si quieres usar otro:
+El modelo por defecto es `gemma4:e2b`. Está definido en `.env.example` y puede cambiarse antes de ejecutar el instalador. Si quieres usar otro:
 
 1. Edita el fichero `.env` en la raíz del proyecto.
 2. Cambia la línea `MODELO_BASE=gemma4:e2b` por el modelo que quieras

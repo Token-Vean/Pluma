@@ -14,7 +14,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from . import router as router_entrada
-from .local_access import exposicion_red_permitida
+from .security_policy import network_exposure_allowed, remote_ollama_allowed
 from .parser_sandbox import sandbox_activo
 from .version import APP_NAME, APP_VERSION
 
@@ -108,10 +108,10 @@ def generar_ficha_tecnica(
             "procesamiento_local_previsto": True,
             "perfil": os.getenv("PERFIL", "no especificado"),
             "ollama_endpoint": _host_ollama(),
-            "allow_remote_ollama": _env_true("ALLOW_REMOTE_OLLAMA"),
-            "allow_network_exposure": exposicion_red_permitida(),
+            "allow_remote_ollama": remote_ollama_allowed(),
+            "allow_network_exposure": network_exposure_allowed(),
             "sandbox_parsers_activo": sandbox_activo(),
-            "apagado_ui_permitido": _env_true("PERMITIR_APAGADO_UI", "true"),
+            "apagado_ui_permitido": _env_true("PERMITIR_APAGADO_UI", "false"),
         },
         "limites_aplicados": {
             "tamano_maximo_fichero_bytes": router_entrada.TAMANO_MAXIMO_BYTES,

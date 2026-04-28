@@ -4,15 +4,13 @@ Preparación automática del entorno LLM.
 Se ejecuta al arrancar la aplicación. Idempotente: si todo está ya
 listo, termina en milisegundos. Si falta algo, lo prepara.
 
-Comportamiento según el perfil de despliegue:
+Comportamiento de la release pública:
 
-    bundled   → Ollama corre en un contenedor Docker que nosotros
-                gestionamos. Podemos descargar modelos automáticamente
-                si faltan.
-
-    external  → Ollama corre en el equipo del usuario. NO descargamos
-                nada sin permiso: si el modelo configurado no existe,
-                informamos y le pedimos que lo descargue él.
+    bundled-local-locked → Ollama corre en local. Por defecto se usa el servicio
+                           Docker interno `ollama`; si el instalador detecta que
+                           el modelo base ya existe en Ollama de Windows/macOS,
+                           se permite `host.docker.internal` como endpoint local
+                           para evitar descargas duplicadas.
 
 API de creación de modelos:
     Ollama 0.5+ cambió el formato de POST /api/create. Ya no acepta
@@ -33,17 +31,20 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
+OLLAMA_URL = os.getenv("OLLAMA_URL", "http://ollama:11434")
+PLUMA_OLLAMA_MODE = os.getenv("PLUMA_OLLAMA_MODE", "container")
 MODELO_BASE = os.getenv("MODELO_BASE", "gemma4:e2b")
-MODELO_NOMBRE = os.getenv("MODELO_NOMBRE", "asistente-archivistico")
+MODELO_NOMBRE = os.getenv("MODELO_NOMBRE", "pluma:0.4.16")
 MODELFILE_PATH = Path(os.getenv("MODELFILE_PATH", "/app/Modelfile"))
-PERFIL = os.getenv("PERFIL", "bundled").strip().lower()
+PERFIL = os.getenv("PERFIL", "bundled-local-locked").strip().lower()
 
 estado: dict = {
     "fase": "iniciando",
     "mensaje": "",
     "listo": False,
     "perfil": PERFIL,
+    "ollama_mode": PLUMA_OLLAMA_MODE,
+    "ollama_url": OLLAMA_URL,
     "modelo_base": MODELO_BASE,
     "modelo_nombre": MODELO_NOMBRE,
 }
@@ -69,6 +70,20 @@ def _timeout_largo() -> httpx.Timeout:
 async def preparar() -> None:
     try:
         await _esperar_ollama()
+
+        # Si el modelo especializado ya existe (por ejemplo, importado desde
+        # GGUF offline o creado previamente en Ollama local del usuario), no
+        # forzamos la descarga del modelo base. Esto evita descargas duplicadas
+        # y respeta instalaciones locales ya preparadas.
+        if await _modelo_existe(MODELO_NOMBRE):
+            estado.update(
+                fase="listo",
+                mensaje=f"Modelo especializado {MODELO_NOMBRE} disponible",
+                listo=True,
+            )
+            logger.info("Bootstrap omitido: %s ya existe", MODELO_NOMBRE)
+            return
+
         await _asegurar_modelo_base()
         await _crear_modelo_derivado()
         estado.update(fase="listo", mensaje="Todo preparado", listo=True)
@@ -102,15 +117,9 @@ async def _asegurar_modelo_base() -> None:
         return
 
     if PERFIL == "external":
-        modelos = await _listar_modelos()
-        lista = ", ".join(modelos[:10]) if modelos else "(ninguno)"
         raise RuntimeError(
-            f"El modelo «{MODELO_BASE}» no está disponible en tu Ollama.\n"
-            f"Modelos que sí tienes: {lista}\n\n"
-            f"Opciones para solucionarlo:\n"
-            f"  1) Descárgalo desde una terminal con: ollama pull {MODELO_BASE}\n"
-            f"  2) O edita el fichero .env y cambia MODELO_BASE por un modelo "
-            f"que ya tengas, y reinicia la aplicación."
+            "El perfil external no está disponible en la release pública de PlumA. "
+            "Use el despliegue local bloqueado con Ollama dentro de Docker."
         )
 
     estado.update(

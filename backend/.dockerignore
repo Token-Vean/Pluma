@@ -1,0 +1,21 @@
+# PlumA backend Docker build context
+# Solo se copian los elementos necesarios para construir la imagen de la app.
+*
+!Dockerfile
+!requirements.txt
+!app/
+!app/**
+
+# Exclusiones defensivas adicionales
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+.env.*
+.git/
+.gitignore
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.log

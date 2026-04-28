@@ -1,23 +1,21 @@
 """
 Cliente Ollama para PlumA.
 
-El diseño presupone procesamiento local. Por defecto solo se permite conectar
-con Ollama en loopback, host.docker.internal o el servicio Docker interno
-"ollama". Si se quiere usar un endpoint remoto, debe declararse explícitamente
-ALLOW_REMOTE_OLLAMA=true, porque eso puede enviar texto e imágenes de los
-documentos fuera del equipo.
+La release pública está bloqueada para procesamiento local. En modo estricto,
+Ollama debe ser el servicio Docker interno `ollama` o loopback en desarrollo
+controlado. No se aceptan endpoints remotos aunque el usuario manipule `.env`.
 """
 
 from __future__ import annotations
 
 import base64
-import ipaddress
 import logging
 import os
 from typing import Any
-from urllib.parse import urlparse
 
 import httpx
+
+from .security_policy import remote_ollama_allowed, validate_ollama_url
 
 logger = logging.getLogger(__name__)
 
@@ -25,62 +23,13 @@ logger = logging.getLogger(__name__)
 # Configuración
 # -----------------------------------------------------------------------------
 
-OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434").rstrip("/")
-ALLOW_REMOTE_OLLAMA = os.getenv("ALLOW_REMOTE_OLLAMA", "false").strip().lower() in {
-    "1", "true", "yes", "si", "sí", "on",
-}
+OLLAMA_URL = os.getenv("OLLAMA_URL", "http://ollama:11434").rstrip("/")
+ALLOW_REMOTE_OLLAMA = remote_ollama_allowed()
 TIMEOUT = httpx.Timeout(connect=10.0, read=300.0, write=30.0, pool=10.0)
-NUM_PREDICT = int(os.getenv("OLLAMA_NUM_PREDICT", "8192"))
-NUM_CTX = int(os.getenv("OLLAMA_NUM_CTX", "32768"))
+NUM_PREDICT = int(os.getenv("OLLAMA_NUM_PREDICT", "4096"))
+NUM_CTX = int(os.getenv("OLLAMA_NUM_CTX", "8192"))
 
-_HOSTS_LOCALES_PERMITIDOS = {
-    "localhost",
-    "127.0.0.1",
-    "::1",
-    "host.docker.internal",
-    "ollama",  # nombre del servicio en la red interna de Docker Compose
-}
-
-
-def _validar_ollama_url(url: str) -> None:
-    p = urlparse(url)
-    if p.scheme not in {"http", "https"} or not p.netloc:
-        raise RuntimeError(
-            "OLLAMA_URL debe ser una URL HTTP/HTTPS válida, por ejemplo "
-            "http://localhost:11434."
-        )
-    if p.username or p.password:
-        raise RuntimeError("OLLAMA_URL no debe incluir credenciales embebidas.")
-
-    host = (p.hostname or "").lower()
-    if ALLOW_REMOTE_OLLAMA:
-        logger.warning(
-            "ALLOW_REMOTE_OLLAMA=true: el contenido documental puede enviarse a %s", url
-        )
-        return
-
-    if host in _HOSTS_LOCALES_PERMITIDOS:
-        return
-
-    try:
-        ip = ipaddress.ip_address(host)
-    except ValueError:
-        raise RuntimeError(
-            "OLLAMA_URL apunta a un host no local. Por seguridad, esta herramienta "
-            "solo permite Ollama local salvo que defina ALLOW_REMOTE_OLLAMA=true."
-        ) from None
-
-    if ip.is_loopback:
-        return
-
-    raise RuntimeError(
-        "OLLAMA_URL apunta a una IP no local. Esto puede exfiltrar documentos. "
-        "Use un Ollama local o defina ALLOW_REMOTE_OLLAMA=true bajo su responsabilidad."
-    )
-
-
-_validar_ollama_url(OLLAMA_URL)
-
+validate_ollama_url(OLLAMA_URL)
 
 # -----------------------------------------------------------------------------
 # Llamadas al modelo
@@ -119,7 +68,16 @@ async def generar(
 
     async with httpx.AsyncClient(timeout=TIMEOUT) as cliente:
         resp = await cliente.post(f"{OLLAMA_URL}/api/generate", json=payload)
-        resp.raise_for_status()
+        if resp.is_error:
+            detalle = (resp.text or "").strip().replace("\n", " ")[:1200]
+            if resp.status_code >= 500:
+                raise RuntimeError(
+                    f"Ollama devolvió HTTP {resp.status_code} en /api/generate. "
+                    f"La causa exacta debe comprobarse en los logs de Ollama; "
+                    f"puede deberse a memoria insuficiente, formato de petición, tamaño de contexto "
+                    f"o error interno del motor. Detalle: {detalle}"
+                )
+            raise RuntimeError(f"Ollama devolvió HTTP {resp.status_code}: {detalle}")
         data = resp.json()
         respuesta = data.get("response")
         if not isinstance(respuesta, str):

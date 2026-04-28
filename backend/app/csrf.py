@@ -191,6 +191,16 @@ class ProteccionCSRF(BaseHTTPMiddleware):
         if _peticion_exenta(request):
             return await call_next(request)
 
+        sec_fetch_site = request.headers.get("sec-fetch-site", "").lower()
+        if sec_fetch_site == "cross-site":
+            logger.warning(
+                "CSRF: petición %s %s rechazada (Sec-Fetch-Site=cross-site)",
+                request.method, request.url.path,
+            )
+            return _respuesta_403(
+                "Petición rechazada: origen cruzado no permitido. PlumA solo acepta acciones desde su propia interfaz local."
+            )
+
         origen = _extraer_origen(request)
         if origen is None:
             logger.warning(

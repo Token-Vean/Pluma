@@ -59,8 +59,8 @@ formativa.
 8. **Restricción de Ollama remoto**
    - `OLLAMA_URL` se valida al arrancar.
    - Por defecto solo se permiten `localhost`, `127.0.0.1`, `::1`,
-     `host.docker.internal` y el servicio Docker `ollama`.
-   - Un endpoint remoto requiere `ALLOW_REMOTE_OLLAMA=true`, porque puede enviar
+     el servicio Docker interno `ollama`.
+   - Un endpoint remoto requiere `ALLOW_REMOTE_OLLAMA=true (solo desarrollo, sin efecto en la release pública con PLUMA_STRICT_LOCAL=true)`, porque puede enviar
      texto e imágenes documentales fuera del equipo.
 
 9. **FastAPI con superficie reducida**
@@ -124,3 +124,8 @@ Para que el botón funcione, los servicios `app` y `app-external` usan `restart:
 La traducción ES/EN se realiza en el frontend para la interfaz y en el backend para la salida del modelo. El idioma activo se envía como `idioma_salida` en cada análisis, y el prompt de extracción instruye al modelo para redactar los valores propuestos en ese idioma. Las evidencias se mantienen como fragmentos literales del documento original para no romper la trazabilidad ni la localización de spans.
 
 Esto no duplica los esquemas YAML ni sustituye una localización normativa completa de ISAD(G), ISAAR(CPF), ISDF o ISDIAH; los campos y las instrucciones base siguen definidos en los YAML, pero la redacción de las propuestas se controla por el idioma seleccionado en la interfaz.
+
+
+## Modo local bloqueado de la release pública
+
+La release pública de PlumA fuerza `PLUMA_STRICT_LOCAL=true`, publica la interfaz solo en `127.0.0.1` y usa exclusivamente el servicio Docker interno `ollama`. El perfil `external` no se distribuye en esta variante.

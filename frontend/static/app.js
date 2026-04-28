@@ -21,7 +21,10 @@
    1. Estado global y utilidades
    ========================================================================== */
 
+const documentoPrincipal = document;
+
 const estado = {
+  uiDocument: documentoPrincipal,
   motorListo: false,
   normas: [],
   normaActual: null,
@@ -36,11 +39,31 @@ const estado = {
   idioma: localStorage.getItem('idioma-ui') || 'es',
 };
 
-function $(id) { return document.getElementById(id); }
+function documentoActivo() {
+  return estado.uiDocument || documentoPrincipal;
+}
+
+function $(id) {
+  const doc = documentoActivo();
+  return doc.getElementById(id) || documentoPrincipal.getElementById(id);
+}
+
+function $$(selector) {
+  return Array.from(documentoActivo().querySelectorAll(selector));
+}
+
+function crearElemento(tag) {
+  return documentoActivo().createElement(tag);
+}
+
+function cuerpoActivo() {
+  return documentoActivo().body || documentoPrincipal.body;
+}
 
 function mostrarPantalla(nombre) {
-  document.querySelectorAll('.pantalla').forEach(p => p.classList.remove('activa'));
-  $('pantalla-' + nombre).classList.add('activa');
+  $$('.pantalla').forEach(p => p.classList.remove('activa'));
+  const pantalla = $('pantalla-' + nombre);
+  if (pantalla) pantalla.classList.add('activa');
 }
 
 function formatearBytes(n) {
@@ -72,7 +95,7 @@ function escapeHtml(s) {
 const I18N = {
   es: {
     'brand.title': 'PlumA',
-    'brand.subtitle': 'Descripción asistida · v0.4.1-alpha',
+    'brand.subtitle': 'Descripción asistida · v0.4.16-alpha',
     'language.label': 'Idioma',
     'language.title': 'Idioma de la interfaz',
     'engine.statusTitle': 'Estado del motor de IA',
@@ -133,12 +156,15 @@ const I18N = {
     'footer.license': 'Licencia AGPL-3.0',
     'float.title': 'Abrir en ventana flotante sobre otras aplicaciones',
     'float.button': 'Ventana flotante',
-    'shutdown.title': 'Apagar el servidor local',
-    'shutdown.button': 'Apagar',
-    'shutdown.confirm': 'Se detendrá el servidor local de la aplicación. En modo bundled, Ollama puede seguir activo hasta ejecutar detener.bat/detener.sh. ¿Continuar?',
-    'shutdown.sending': 'Apagando…',
-    'shutdown.done': 'Apagado iniciado. Puede cerrar esta pestaña.',
-    'shutdown.error': 'No se pudo apagar desde la interfaz: {mensaje}',
+    'closeInterface.title': 'Cerrar la interfaz',
+    'closeInterface.button': 'Cerrar',
+    'closeInterface.message': 'Puede cerrar esta pestaña o ventana. PlumA seguirá activa en segundo plano hasta detenerla desde el panel o los scripts locales.',
+    'shutdown.title': 'Detener PlumA',
+    'shutdown.button': 'Detener',
+    'shutdown.confirm': 'Se detendrá únicamente el servidor local de PlumA. Para detener también Ollama o limpiar contenedores, use el panel de instalación o detener.bat/detener.sh. ¿Continuar?',
+    'shutdown.sending': 'Deteniendo…',
+    'shutdown.done': 'Detención iniciada. Puede cerrar esta pestaña.',
+    'shutdown.error': 'No se pudo detener desde la interfaz: {mensaje}',
     'processing.overlay': 'Analizando el documento…',
     'processing.notReady': 'El motor de IA todavía no está listo.',
     'processing.success': 'Documento procesado correctamente',
@@ -183,7 +209,7 @@ const I18N = {
   },
   en: {
     'brand.title': 'PlumA',
-    'brand.subtitle': 'Assisted description · v0.4.1-alpha',
+    'brand.subtitle': 'Assisted description · v0.4.16-alpha',
     'language.label': 'Language',
     'language.title': 'Interface language',
     'engine.statusTitle': 'AI engine status',
@@ -244,12 +270,15 @@ const I18N = {
     'footer.license': 'AGPL-3.0 license',
     'float.title': 'Open as a floating window over other applications',
     'float.button': 'Floating window',
-    'shutdown.title': 'Shut down the local server',
-    'shutdown.button': 'Shut down',
-    'shutdown.confirm': 'This will stop the local application server. In bundled mode, Ollama may remain running until detener.bat/detener.sh is executed. Continue?',
-    'shutdown.sending': 'Shutting down…',
-    'shutdown.done': 'Shutdown started. You may close this tab.',
-    'shutdown.error': 'The application could not be shut down from the interface: {mensaje}',
+    'closeInterface.title': 'Close the interface',
+    'closeInterface.button': 'Close',
+    'closeInterface.message': 'You can close this tab or window. PlumA will keep running in the background until you stop it from the launcher panel or local scripts.',
+    'shutdown.title': 'Stop PlumA',
+    'shutdown.button': 'Stop',
+    'shutdown.confirm': 'This will stop only the local PlumA application server. To stop Ollama as well or clean containers, use the installer panel or detener.bat/detener.sh. Continue?',
+    'shutdown.sending': 'Stopping…',
+    'shutdown.done': 'Stop requested. You may close this tab.',
+    'shutdown.error': 'The application could not be stopped from the interface: {mensaje}',
     'processing.overlay': 'Analysing the document…',
     'processing.notReady': 'The AI engine is not ready yet.',
     'processing.success': 'Document processed successfully',
@@ -451,19 +480,19 @@ function textoOpcionNorma(n) {
 function aplicarIdioma(idioma) {
   estado.idioma = idioma === 'en' ? 'en' : 'es';
   localStorage.setItem('idioma-ui', estado.idioma);
-  document.documentElement.lang = estado.idioma;
-  document.title = estado.idioma === 'en' ? 'PlumA' : 'PlumA';
+  documentoActivo().documentElement.lang = estado.idioma;
+  documentoActivo().title = estado.idioma === 'en' ? 'PlumA' : 'PlumA';
 
-  document.querySelectorAll('[data-i18n]').forEach(el => {
+  $$('[data-i18n]').forEach(el => {
     el.textContent = t(el.dataset.i18n);
   });
-  document.querySelectorAll('[data-i18n-html]').forEach(el => {
+  $$('[data-i18n-html]').forEach(el => {
     el.innerHTML = t(el.dataset.i18nHtml);
   });
-  document.querySelectorAll('[data-i18n-title]').forEach(el => {
+  $$('[data-i18n-title]').forEach(el => {
     el.title = t(el.dataset.i18nTitle);
   });
-  document.querySelectorAll('[data-i18n-aria-label]').forEach(el => {
+  $$('[data-i18n-aria-label]').forEach(el => {
     el.setAttribute('aria-label', t(el.dataset.i18nAriaLabel));
   });
 
@@ -501,10 +530,10 @@ function actualizarSelectorNormas() {
       .filter(Boolean);
     if (normasGrupo.length === 0) continue;
 
-    const og = document.createElement('optgroup');
+    const og = crearElemento('optgroup');
     og.label = grupo.label;
     for (const n of normasGrupo) {
-      const op = document.createElement('option');
+      const op = crearElemento('option');
       op.value = n.clave;
       op.textContent = textoOpcionNorma(n);
       og.appendChild(op);
@@ -518,7 +547,7 @@ function actualizarSelectorNormas() {
   for (const g of Object.values(grupos)) g.claves.forEach(c => clavesEnGrupos.add(c));
   for (const n of estado.normas) {
     if (!clavesEnGrupos.has(n.clave)) {
-      const op = document.createElement('option');
+      const op = crearElemento('option');
       op.value = n.clave;
       op.textContent = textoOpcionNorma(n);
       selector.appendChild(op);
@@ -588,6 +617,28 @@ async function fetchProtegido(url, opciones = {}) {
   }
 
   return r;
+}
+
+async function aplicarPoliticaSeguridadUI() {
+  try {
+    const r = await fetch('/api/seguridad-local');
+    if (!r.ok) return;
+    const data = await r.json();
+    const botonApagar = $('boton-apagar');
+    if (!botonApagar) return;
+
+    if (data.apagado_ui_permitido === true) {
+      botonApagar.style.display = '';
+      botonApagar.disabled = false;
+      botonApagar.removeAttribute('aria-hidden');
+    } else {
+      botonApagar.style.display = 'none';
+      botonApagar.disabled = true;
+      botonApagar.setAttribute('aria-hidden', 'true');
+    }
+  } catch (err) {
+    console.warn('No se pudo consultar la política local de seguridad:', err);
+  }
 }
 
 
@@ -704,11 +755,17 @@ function inicializarDropZone() {
   const dz = $('drop-zone');
   const input = $('selector-fichero');
 
-  dz.addEventListener('click', () => input.click());
+  // En modo flotante (Document Picture-in-Picture) el <body> se mueve a otro
+  // document/window. Algunos navegadores abren el selector de fichero pero no
+  // propagan bien el cambio si el input oculto pertenece al documento original
+  // o conserva el mismo valor. Por eso se crea un input temporal en el
+  // ownerDocument real del botón pulsado. También soluciona la selección
+  // repetida del mismo fichero.
+  dz.addEventListener('click', (e) => abrirSelectorFichero(e.currentTarget));
   dz.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
-      input.click();
+      abrirSelectorFichero(e.currentTarget);
     }
   });
 
@@ -725,15 +782,112 @@ function inicializarDropZone() {
     }
   });
 
+  // Conservamos el input fijo como fallback de accesibilidad si alguna extensión
+  // o navegador antiguo lo activa directamente.
   input.addEventListener('change', (e) => {
     if (e.target.files.length > 0) {
       procesarFichero(e.target.files[0]);
+      e.target.value = '';
     }
   });
 
   $('boton-otro-documento').addEventListener('click', irABienvenida);
   $('boton-reprocesar').addEventListener('click', () => {
     if (estado.ficheroActual) procesarFichero(estado.ficheroActual);
+  });
+}
+
+async function abrirSelectorFichero(origen) {
+  const docActivo = (origen && origen.ownerDocument) || documentoActivo();
+  const winActivo = docActivo.defaultView || window;
+  const accept = '.pdf,.docx,.txt,.jpg,.jpeg,.png,.tif,.tiff,.webp';
+  const pickerTypes = [{
+    description: 'Documentos admitidos',
+    accept: {
+      'application/pdf': ['.pdf'],
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
+      'text/plain': ['.txt'],
+      'image/jpeg': ['.jpg', '.jpeg'],
+      'image/png': ['.png'],
+      'image/tiff': ['.tif', '.tiff'],
+      'image/webp': ['.webp'],
+    },
+  }];
+
+  // En Document Picture-in-Picture el DOM visible está en otra ventana, pero la
+  // lógica de red y estado sigue viviendo en la ventana principal. Para no
+  // perder el fichero seleccionado, probamos primero el File System Access API
+  // de la ventana principal y después el de la ventana activa.
+  const candidatosPicker = [];
+  if (typeof window.showOpenFilePicker === 'function') candidatosPicker.push(window);
+  if (winActivo !== window && typeof winActivo.showOpenFilePicker === 'function') candidatosPicker.push(winActivo);
+
+  for (const win of candidatosPicker) {
+    try {
+      const handles = await win.showOpenFilePicker({ multiple: false, types: pickerTypes });
+      if (handles && handles.length > 0) {
+        const file = await handles[0].getFile();
+        if (file) {
+          await procesarFichero(file);
+          return;
+        }
+      }
+    } catch (err) {
+      if (err && err.name === 'AbortError') return;
+      console.warn('showOpenFilePicker falló; probando alternativa:', err);
+    }
+  }
+
+  // Fallback deliberadamente anclado al documento principal. En algunas
+  // versiones de Chromium el input creado dentro del documento PiP abre el
+  // selector, pero no conserva correctamente FileList al volver al callback.
+  await abrirSelectorConInputTemporal(documentoPrincipal, accept);
+}
+
+function abrirSelectorConInputTemporal(doc, accept) {
+  return new Promise((resolve) => {
+    const temporal = doc.createElement('input');
+    temporal.type = 'file';
+    temporal.accept = accept;
+    temporal.style.position = 'fixed';
+    temporal.style.left = '-10000px';
+    temporal.style.top = '0';
+    temporal.style.width = '1px';
+    temporal.style.height = '1px';
+    temporal.style.opacity = '0';
+    temporal.setAttribute('aria-hidden', 'true');
+
+    let resuelto = false;
+    const limpiar = () => {
+      temporal.value = '';
+      setTimeout(() => temporal.remove(), 0);
+    };
+    const terminar = () => {
+      if (!resuelto) {
+        resuelto = true;
+        limpiar();
+        resolve();
+      }
+    };
+
+    temporal.addEventListener('change', async () => {
+      try {
+        if (temporal.files && temporal.files.length > 0) {
+          await procesarFichero(temporal.files[0]);
+        }
+      } finally {
+        terminar();
+      }
+    }, { once: true });
+
+    // Si el usuario cancela, algunos navegadores no disparan change. No afecta
+    // a la selección normal y evita inputs huérfanos.
+    window.setTimeout(() => {
+      if (!resuelto && (!temporal.files || temporal.files.length === 0)) terminar();
+    }, 60000);
+
+    (doc.body || doc.documentElement).appendChild(temporal);
+    temporal.click();
   });
 }
 
@@ -789,7 +943,7 @@ async function procesarFichero(fichero) {
     if (estado.modoActual !== 'personalizado') {
       estado.camposPersonalizados = null;
     }
-    document.querySelectorAll('#selector-modo .modo').forEach(b => {
+    $$('#selector-modo .modo').forEach(b => {
       if (b.id === 'boton-personalizar') {
         b.classList.toggle('activo', estado.modoActual === 'personalizado');
       } else {
@@ -891,7 +1045,7 @@ function renderCampos() {
   let extraidos = 0;
 
   for (const [etiqueta, items] of grupos) {
-    const h = document.createElement('div');
+    const h = crearElemento('div');
     h.className = 'area-titulo';
     h.textContent = traducirDinamico(etiqueta);
     contenedor.appendChild(h);
@@ -914,7 +1068,7 @@ function renderCampos() {
     mostrar.onclick = () => {
       estado.modoActual = 'completo';
       estado.camposPersonalizados = null;
-      document.querySelectorAll('.modo').forEach(b => {
+      $$('.modo').forEach(b => {
         b.classList.toggle('activo', b.dataset.modo === 'completo');
       });
       renderCampos();
@@ -1032,7 +1186,7 @@ function crearElementoCampo(c) {
 }
 
 function ajustarAlturasCamposVisibles() {
-  document.querySelectorAll('.campo-valor').forEach(ajustarAlturaTextarea);
+  $$('.campo-valor').forEach(ajustarAlturaTextarea);
 }
 
 function ajustarAlturaTextarea(el) {
@@ -1055,7 +1209,7 @@ function renderAdvertencias(lista) {
   contenedor.innerHTML = '';
   if (!lista || lista.length === 0) return;
 
-  const div = document.createElement('div');
+  const div = crearElemento('div');
   div.className = 'aviso-advertencia';
   div.innerHTML = `
     <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
@@ -1121,12 +1275,12 @@ function descargarAuditoria() {
   }
   const blob = new Blob([JSON.stringify(auditoria, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
+  const a = crearElemento('a');
   a.href = url;
   a.download = `pluma-ficha-tecnica-${auditoria.peticion_id || 'proceso'}.json`;
-  document.body.appendChild(a);
+  cuerpoActivo().appendChild(a);
   a.click();
-  document.body.removeChild(a);
+  cuerpoActivo().removeChild(a);
   setTimeout(() => URL.revokeObjectURL(url), 1000);
   toast(t('audit.downloaded'), 'ok');
 }
@@ -1210,7 +1364,7 @@ async function exportar(formato) {
   // Cada elemento .campo tiene un dataset.clave con la clave del campo;
   // así no dependemos del orden de los elementos en el DOM (que puede
   // estar filtrado por el modo personalizado).
-  document.querySelectorAll('.campo').forEach((elCampo) => {
+  $$('.campo').forEach((elCampo) => {
     const clave = elCampo.dataset.clave;
     const ta = elCampo.querySelector('.campo-valor');
     if (!clave || !ta) return;
@@ -1263,12 +1417,12 @@ async function exportar(formato) {
     const nombre = match ? match[1] : 'export.' + formato;
 
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
+    const a = crearElemento('a');
     a.href = url;
     a.download = nombre;
-    document.body.appendChild(a);
+    cuerpoActivo().appendChild(a);
     a.click();
-    document.body.removeChild(a);
+    cuerpoActivo().removeChild(a);
     setTimeout(() => URL.revokeObjectURL(url), 1000);
 
     toast(t('export.downloaded', { nombre }), 'ok');
@@ -1343,23 +1497,23 @@ function construirCuadriculaModal() {
   const seleccionado = estado.camposPersonalizados || new Set(campos.map(c => c.clave));
   
   for (const [areaId, area] of Object.entries(porArea)) {
-    const div = document.createElement('div');
+    const div = crearElemento('div');
     div.className = 'modal-area';
     div.dataset.areaId = areaId;
     
-    const titulo = document.createElement('div');
+    const titulo = crearElemento('div');
     titulo.className = 'modal-area-titulo';
     
-    const nombreAr = document.createElement('span');
+    const nombreAr = crearElemento('span');
     nombreAr.textContent = area.nombre;
     titulo.appendChild(nombreAr);
     
-    const cuenta = document.createElement('span');
+    const cuenta = crearElemento('span');
     cuenta.className = 'modal-area-cuenta';
     cuenta.textContent = `${area.elementos.length} ${area.elementos.length === 1 ? 'campo' : 'campos'}`;
     titulo.appendChild(cuenta);
     
-    const botonAr = document.createElement('button');
+    const botonAr = crearElemento('button');
     botonAr.type = 'button';
     botonAr.className = 'modal-area-checkbox';
     botonAr.textContent = t('custom.toggleArea') || 'Marcar/desmarcar área';
@@ -1368,27 +1522,27 @@ function construirCuadriculaModal() {
     
     div.appendChild(titulo);
     
-    const campos_div = document.createElement('div');
+    const campos_div = crearElemento('div');
     campos_div.className = 'modal-campos';
     
     for (const campo of area.elementos) {
-      const label = document.createElement('label');
+      const label = crearElemento('label');
       label.className = 'modal-campo';
       if (campo.obligatorio) label.classList.add('obligatorio');
       
-      const cb = document.createElement('input');
+      const cb = crearElemento('input');
       cb.type = 'checkbox';
       cb.value = campo.clave;
       cb.checked = seleccionado.has(campo.clave);
       label.appendChild(cb);
       
-      const nombre = document.createElement('span');
+      const nombre = crearElemento('span');
       nombre.className = 'modal-campo-nombre';
       nombre.textContent = campo.nombre || campo.clave;
       label.appendChild(nombre);
       
       if (campo.id) {
-        const codigo = document.createElement('span');
+        const codigo = crearElemento('span');
         codigo.className = 'modal-campo-codigo';
         codigo.textContent = campo.id;
         label.appendChild(codigo);
@@ -1436,7 +1590,7 @@ function aplicarFiltroPersonalizado() {
   estado.modoActual = 'personalizado';
   
   // Marcar el botón "Personalizar" como activo y desmarcar los otros
-  document.querySelectorAll('#selector-modo .modo').forEach(b => b.classList.remove('activo'));
+  $$('#selector-modo .modo').forEach(b => b.classList.remove('activo'));
   $('boton-personalizar').classList.add('activo');
   
   cerrarModalPersonalizar();
@@ -1447,8 +1601,25 @@ function aplicarFiltroPersonalizado() {
 
 
 /* =============================================================================
-   8c. Apagado local desde la interfaz
+   8c. Cierre de interfaz y apagado local opcional
    ========================================================================== */
+
+function cerrarInterfaz() {
+  const boton = $('boton-cerrar-interfaz');
+  const doc = boton?.ownerDocument || document;
+  const win = doc.defaultView || window;
+
+  toast(t('closeInterface.message'), 'ok');
+
+  try {
+    // window.close() solo funciona si la ventana fue abierta por script. En una
+    // pestaña normal, el navegador lo bloqueará; en ese caso dejamos una
+    // instrucción clara al usuario y no intentamos detener el servidor local.
+    win.close();
+  } catch (err) {
+    console.warn('No se pudo cerrar automáticamente la interfaz:', err);
+  }
+}
 
 async function apagarAplicacion() {
   const boton = $('boton-apagar');
@@ -1515,37 +1686,41 @@ function inicializarModoFlotante() {
         height: 820,
       });
 
-      // Clonar estilos al documento PiP
-      [...document.styleSheets].forEach(ss => {
+      // Clonar estilos al documento PiP desde el documento principal.
+      [...documentoPrincipal.styleSheets].forEach(ss => {
         try {
           const reglas = [...ss.cssRules].map(r => r.cssText).join('');
-          const style = document.createElement('style');
+          const style = pipWindow.document.createElement('style');
           style.textContent = reglas;
           pipWindow.document.head.appendChild(style);
         } catch {
-          // Estilos de orígenes cruzados: copiamos el <link>
-          const link = document.createElement('link');
+          // Estilos de orígenes cruzados: copiamos el <link>.
+          const link = pipWindow.document.createElement('link');
           link.rel = 'stylesheet';
           link.href = ss.href;
           pipWindow.document.head.appendChild(link);
         }
       });
 
-      // Copiar las fuentes externas
-      document.querySelectorAll('link[rel="stylesheet"]').forEach(l => {
+      // Copiar hojas de estilo declaradas como <link>.
+      documentoPrincipal.querySelectorAll('link[rel="stylesheet"]').forEach(l => {
         const copia = l.cloneNode(true);
         pipWindow.document.head.appendChild(copia);
       });
 
-      // Mover el contenido principal a la ventana PiP
-      const main = document.body;
-      const marcador = document.createElement('div');
+      // Mover el contenido principal a la ventana PiP y declarar ese documento
+      // como documento activo para todos los selectores, overlays, toasts,
+      // inputs temporales y renders posteriores.
+      const main = documentoPrincipal.body;
+      const marcador = documentoPrincipal.createElement('div');
       marcador.id = '__pip_marcador__';
       main.parentNode.insertBefore(marcador, main);
       pipWindow.document.body.appendChild(main);
+      estado.uiDocument = pipWindow.document;
 
-      // Al cerrar la PiP, devolver el contenido al documento original
+      // Al cerrar la PiP, devolver el contenido al documento original.
       pipWindow.addEventListener('pagehide', () => {
+        estado.uiDocument = documentoPrincipal;
         marcador.parentNode.replaceChild(main, marcador);
       });
 
@@ -1556,14 +1731,13 @@ function inicializarModoFlotante() {
   });
 }
 
-
 /* =============================================================================
    10. Toasts
    ========================================================================== */
 
-function toast(mensaje, tipo = '', doc = document) {
-  const contexto = doc || document;
-  const contenedor = contexto.getElementById('toasts') || document.getElementById('toasts');
+function toast(mensaje, tipo = '', doc = null) {
+  const contexto = doc || documentoActivo();
+  const contenedor = contexto.getElementById('toasts') || documentoPrincipal.getElementById('toasts');
 
   if (!contenedor) {
     console.warn('No se encontró el contenedor de notificaciones:', mensaje);
@@ -1592,8 +1766,9 @@ function inicializarControles() {
     }
   });
 
-  // Apagado local
-  $('boton-apagar').addEventListener('click', apagarAplicacion);
+  // Cierre de interfaz y apagado local opcional
+  $('boton-cerrar-interfaz')?.addEventListener('click', cerrarInterfaz);
+  $('boton-apagar')?.addEventListener('click', apagarAplicacion);
 
   // Selector de norma
   $('selector-norma').addEventListener('change', (e) => {
@@ -1605,7 +1780,7 @@ function inicializarControles() {
   });
 
   // Selector de modo
-  document.querySelectorAll('#selector-modo .modo').forEach(btn => {
+  $$('#selector-modo .modo').forEach(btn => {
     btn.addEventListener('click', () => {
       // El botón "Personalizar" abre un modal en vez de cambiar el modo
       if (btn.id === 'boton-personalizar') {
@@ -1613,7 +1788,7 @@ function inicializarControles() {
         return;
       }
       // Los modos normales (esencial / completo)
-      document.querySelectorAll('#selector-modo .modo').forEach(b => {
+      $$('#selector-modo .modo').forEach(b => {
         if (b.id !== 'boton-personalizar') b.classList.remove('activo');
       });
       btn.classList.add('activo');
@@ -1662,6 +1837,7 @@ async function main() {
   // Si falla, las peticiones mutadoras posteriores también fallarán,
   // pero fetchProtegido se encargará de reintentar pidiendo el token.
   await obtenerTokenCSRF();
+  await aplicarPoliticaSeguridadUI();
 
   inicializarDropZone();
   inicializarControles();

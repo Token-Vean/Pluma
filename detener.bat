@@ -4,6 +4,7 @@ REM PlumA - detener servicios
 REM =============================================================================
 
 setlocal EnableDelayedExpansion
+if exist "%~dp0tools\windows\pluma-env.bat" call "%~dp0tools\windows\pluma-env.bat" >nul 2>nul
 
 cd /d "%~dp0"
 
