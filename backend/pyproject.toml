@@ -1,16 +1,16 @@
 [project]
 name = "pluma"
-version = "0.4.16-alpha"
+version = "0.5.0-beta"
 description = "Asistente de descripción archivística asistida por IA local"
 readme = "../README.md"
 requires-python = ">=3.11"
 license = { text = "AGPL-3.0-or-later" }
 authors = [
-    { name = "Víctor Villapalos Sánchez" },
+    { name = "Víctor Villapalos Pardiñas" },
 ]
 keywords = ["archivística", "ISAD(G)", "ISAAR", "ISDF", "ISDIAH", "IA", "Ollama"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Other Audience",
     "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
     "Operating System :: OS Independent",

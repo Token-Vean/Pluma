@@ -11,7 +11,7 @@ LICENCIA APLICABLE A ESTE PROYECTO
 ================================================================================
 
 PlumA
-Copyright (C) 2026 Víctor Villapalos Sánchez
+Copyright (C) 2026 Víctor Villapalos Pardiñas
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU Affero General Public License as
@@ -52,7 +52,7 @@ Pasos sugeridos:
   3. Reemplazar el contenido de este fichero por:
        (a) El texto íntegro descargado.
        (b) Al final, el aviso de copyright "PlumA /
-           Copyright (C) 2026 Víctor Villapalos Sánchez" que figura
+           Copyright (C) 2026 Víctor Villapalos Pardiñas" que figura
            arriba.
 
 Sin el texto íntegro, la licencia no se aplica correctamente y los
@@ -68,7 +68,7 @@ To apply this license to new source files, attach the following boilerplate
 at the start of each file:
 
     <PlumA — módulo [nombre]>
-    Copyright (C) 2026  Víctor Villapalos Sánchez
+    Copyright (C) 2026  Víctor Villapalos Pardiñas
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU Affero General Public License as

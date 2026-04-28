@@ -95,7 +95,7 @@ function escapeHtml(s) {
 const I18N = {
   es: {
     'brand.title': 'PlumA',
-    'brand.subtitle': 'Descripción asistida · v0.4.16-alpha',
+    'brand.subtitle': 'Descripción asistida · v0.5.0-beta',
     'language.label': 'Idioma',
     'language.title': 'Idioma de la interfaz',
     'engine.statusTitle': 'Estado del motor de IA',
@@ -156,15 +156,12 @@ const I18N = {
     'footer.license': 'Licencia AGPL-3.0',
     'float.title': 'Abrir en ventana flotante sobre otras aplicaciones',
     'float.button': 'Ventana flotante',
-    'closeInterface.title': 'Cerrar la interfaz',
-    'closeInterface.button': 'Cerrar',
-    'closeInterface.message': 'Puede cerrar esta pestaña o ventana. PlumA seguirá activa en segundo plano hasta detenerla desde el panel o los scripts locales.',
-    'shutdown.title': 'Detener PlumA',
-    'shutdown.button': 'Detener',
-    'shutdown.confirm': 'Se detendrá únicamente el servidor local de PlumA. Para detener también Ollama o limpiar contenedores, use el panel de instalación o detener.bat/detener.sh. ¿Continuar?',
-    'shutdown.sending': 'Deteniendo…',
-    'shutdown.done': 'Detención iniciada. Puede cerrar esta pestaña.',
-    'shutdown.error': 'No se pudo detener desde la interfaz: {mensaje}',
+    'shutdown.title': 'Apagar el servidor local',
+    'shutdown.button': 'Apagar',
+    'shutdown.confirm': 'Se detendrá el servidor local de la aplicación. En modo bundled, Ollama puede seguir activo hasta ejecutar detener.bat/detener.sh. ¿Continuar?',
+    'shutdown.sending': 'Apagando…',
+    'shutdown.done': 'Apagado iniciado. Puede cerrar esta pestaña.',
+    'shutdown.error': 'No se pudo apagar desde la interfaz: {mensaje}',
     'processing.overlay': 'Analizando el documento…',
     'processing.notReady': 'El motor de IA todavía no está listo.',
     'processing.success': 'Documento procesado correctamente',
@@ -209,7 +206,7 @@ const I18N = {
   },
   en: {
     'brand.title': 'PlumA',
-    'brand.subtitle': 'Assisted description · v0.4.16-alpha',
+    'brand.subtitle': 'Assisted description · v0.5.0-beta',
     'language.label': 'Language',
     'language.title': 'Interface language',
     'engine.statusTitle': 'AI engine status',
@@ -270,15 +267,12 @@ const I18N = {
     'footer.license': 'AGPL-3.0 license',
     'float.title': 'Open as a floating window over other applications',
     'float.button': 'Floating window',
-    'closeInterface.title': 'Close the interface',
-    'closeInterface.button': 'Close',
-    'closeInterface.message': 'You can close this tab or window. PlumA will keep running in the background until you stop it from the launcher panel or local scripts.',
-    'shutdown.title': 'Stop PlumA',
-    'shutdown.button': 'Stop',
-    'shutdown.confirm': 'This will stop only the local PlumA application server. To stop Ollama as well or clean containers, use the installer panel or detener.bat/detener.sh. Continue?',
-    'shutdown.sending': 'Stopping…',
-    'shutdown.done': 'Stop requested. You may close this tab.',
-    'shutdown.error': 'The application could not be stopped from the interface: {mensaje}',
+    'shutdown.title': 'Shut down the local server',
+    'shutdown.button': 'Shut down',
+    'shutdown.confirm': 'This will stop the local application server. In bundled mode, Ollama may remain running until detener.bat/detener.sh is executed. Continue?',
+    'shutdown.sending': 'Shutting down…',
+    'shutdown.done': 'Shutdown started. You may close this tab.',
+    'shutdown.error': 'The application could not be shut down from the interface: {mensaje}',
     'processing.overlay': 'Analysing the document…',
     'processing.notReady': 'The AI engine is not ready yet.',
     'processing.success': 'Document processed successfully',
@@ -624,17 +618,11 @@ async function aplicarPoliticaSeguridadUI() {
     const r = await fetch('/api/seguridad-local');
     if (!r.ok) return;
     const data = await r.json();
-    const botonApagar = $('boton-apagar');
-    if (!botonApagar) return;
-
-    if (data.apagado_ui_permitido === true) {
-      botonApagar.style.display = '';
-      botonApagar.disabled = false;
-      botonApagar.removeAttribute('aria-hidden');
-    } else {
-      botonApagar.style.display = 'none';
-      botonApagar.disabled = true;
-      botonApagar.setAttribute('aria-hidden', 'true');
+    const boton = $('boton-apagar');
+    if (boton && data.apagado_ui_permitido === false) {
+      boton.style.display = 'none';
+      boton.disabled = true;
+      boton.setAttribute('aria-hidden', 'true');
     }
   } catch (err) {
     console.warn('No se pudo consultar la política local de seguridad:', err);
@@ -1115,7 +1103,12 @@ function agruparPorArea(campos) {
 
 function crearElementoCampo(c) {
   const tpl = $('plantilla-campo');
-  const nodo = tpl.content.cloneNode(true).firstElementChild;
+  // Usamos importNode sobre el documento activo (principal o PiP) para que el
+  // ownerDocument del nodo creado sea correcto sin necesidad de adopción
+  // implícita posterior. Funcionalmente equivalente a cloneNode cuando
+  // se renderiza desde el documento principal (caso habitual).
+  const fragmento = documentoActivo().importNode(tpl.content, true);
+  const nodo = fragmento.firstElementChild;
 
   // Clave del campo en dataset (para sincronización fiable al exportar)
   nodo.dataset.clave = c.clave;
@@ -1292,60 +1285,76 @@ function descargarAuditoria() {
 
 async function copiarTexto(boton, texto) {
   const doc = (boton && boton.ownerDocument) ? boton.ownerDocument : document;
-  const win = (doc && doc.defaultView) ? doc.defaultView : window;
+  const winLocal = (doc && doc.defaultView) ? doc.defaultView : window;
+  const winPrincipal = documentoPrincipal.defaultView || window;
 
   if (!texto) {
     toast(t('copy.empty'), '', doc);
     return;
   }
 
+  // Estado visual mediante clase CSS, no manipulando style.display directamente.
+  // Evita que un fallo dentro del setTimeout deje los iconos en estado inconsistente.
   const marcarComoCopiado = () => {
     boton.classList.add('copiado');
-
-    const iconoCopiar = boton.querySelector('.icono-copiar');
-    const iconoOk = boton.querySelector('.icono-ok');
-    if (iconoCopiar) iconoCopiar.style.display = 'none';
-    if (iconoOk) iconoOk.style.display = 'block';
-
-    setTimeout(() => {
-      boton.classList.remove('copiado');
-      if (iconoCopiar) iconoCopiar.style.display = 'block';
-      if (iconoOk) iconoOk.style.display = 'none';
-    }, 1500);
+    setTimeout(() => boton.classList.remove('copiado'), 1500);
   };
 
-  try {
-    // En modo flotante, el clic se produce en el documento Picture-in-Picture.
-    // Usar window.navigator/document del documento propietario del botón evita
-    // perder la activación de usuario al llamar al clipboard desde la ventana principal.
-    if (win.navigator && win.navigator.clipboard && win.navigator.clipboard.writeText) {
-      await win.navigator.clipboard.writeText(texto);
+  // Estrategia en cascada: el clipboard de la PiP a veces falla por checks de
+  // foco/activación en Chromium (DOMException "Document is not focused" o
+  // NotAllowedError). Si pasa, intentamos con el clipboard de la ventana
+  // principal (mismo origen, mismo contexto seguro). Solo como último recurso
+  // caemos a execCommand sobre el documento principal, donde el check de foco
+  // suele pasar.
+  let errPip = null;
+  let errPrincipal = null;
+
+  // 1) navigator.clipboard del documento del botón (PiP o principal).
+  if (winLocal.navigator && winLocal.navigator.clipboard
+      && typeof winLocal.navigator.clipboard.writeText === 'function') {
+    try {
+      await winLocal.navigator.clipboard.writeText(texto);
       marcarComoCopiado();
       return;
+    } catch (e) {
+      errPip = e;
     }
-    throw new Error('Clipboard API no disponible en este contexto');
-  } catch (err) {
-    // Fallback para contextos sin permisos de clipboard (ej. HTTP sin TLS o PiP restrictivo).
+  }
+
+  // 2) navigator.clipboard de la ventana principal, si es distinta.
+  if (winPrincipal !== winLocal
+      && winPrincipal.navigator && winPrincipal.navigator.clipboard
+      && typeof winPrincipal.navigator.clipboard.writeText === 'function') {
     try {
-      const ta = doc.createElement('textarea');
-      ta.value = texto;
-      ta.setAttribute('readonly', '');
-      ta.style.position = 'fixed';
-      ta.style.left = '-9999px';
-      ta.style.top = '0';
-      ta.style.opacity = '0';
-      doc.body.appendChild(ta);
+      await winPrincipal.navigator.clipboard.writeText(texto);
+      marcarComoCopiado();
+      return;
+    } catch (e) {
+      errPrincipal = e;
+    }
+  }
+
+  // 3) Fallback execCommand sobre el documento principal.
+  try {
+    const docFallback = documentoPrincipal;
+    const ta = docFallback.createElement('textarea');
+    ta.value = texto;
+    ta.setAttribute('readonly', '');
+    ta.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0';
+    docFallback.body.appendChild(ta);
+    try {
       ta.focus();
       ta.select();
-      const ok = doc.execCommand('copy');
-      doc.body.removeChild(ta);
-
+      const ok = docFallback.execCommand('copy');
       if (!ok) throw new Error('execCommand copy devolvió false');
       marcarComoCopiado();
-    } catch (fallbackErr) {
-      console.error('No se pudo copiar al portapapeles:', err, fallbackErr);
-      toast(t('copy.error'), 'error', doc);
+    } finally {
+      if (ta.parentNode) ta.parentNode.removeChild(ta);
     }
+  } catch (fallbackErr) {
+    console.error('No se pudo copiar al portapapeles:',
+      { errPip, errPrincipal, fallbackErr });
+    toast(t('copy.error'), 'error', doc);
   }
 }
 
@@ -1601,25 +1610,8 @@ function aplicarFiltroPersonalizado() {
 
 
 /* =============================================================================
-   8c. Cierre de interfaz y apagado local opcional
+   8c. Apagado local desde la interfaz
    ========================================================================== */
-
-function cerrarInterfaz() {
-  const boton = $('boton-cerrar-interfaz');
-  const doc = boton?.ownerDocument || document;
-  const win = doc.defaultView || window;
-
-  toast(t('closeInterface.message'), 'ok');
-
-  try {
-    // window.close() solo funciona si la ventana fue abierta por script. En una
-    // pestaña normal, el navegador lo bloqueará; en ese caso dejamos una
-    // instrucción clara al usuario y no intentamos detener el servidor local.
-    win.close();
-  } catch (err) {
-    console.warn('No se pudo cerrar automáticamente la interfaz:', err);
-  }
-}
 
 async function apagarAplicacion() {
   const boton = $('boton-apagar');
@@ -1766,9 +1758,8 @@ function inicializarControles() {
     }
   });
 
-  // Cierre de interfaz y apagado local opcional
-  $('boton-cerrar-interfaz')?.addEventListener('click', cerrarInterfaz);
-  $('boton-apagar')?.addEventListener('click', apagarAplicacion);
+  // Apagado local
+  $('boton-apagar').addEventListener('click', apagarAplicacion);
 
   // Selector de norma
   $('selector-norma').addEventListener('change', (e) => {

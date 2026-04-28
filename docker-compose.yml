@@ -3,7 +3,7 @@
 # -----------------------------------------------------------------------------
 # Release pública local-first.
 #
-# Corrección 0.4.16-alpha:
+# Corrección 0.5.0-beta:
 #   - El puerto de la aplicación se publica con sintaxis larga y fija:
 #       127.0.0.1:8082 -> 8081/tcp
 #   - No se usa variable editable para publicar el puerto de la interfaz.
@@ -39,7 +39,7 @@ services:
     cpus: 4
 
   app:
-    image: pluma-app:0.4.16-alpha
+    image: pluma-app:0.5.0-beta
     build: ./backend
     container_name: pluma-app
     environment:
@@ -57,7 +57,7 @@ services:
 
       # Parámetros funcionales permitidos.
       MODELO_BASE: ${MODELO_BASE:-gemma4:e2b}
-      MODELO_NOMBRE: ${MODELO_NOMBRE:-pluma:0.4.16}
+      MODELO_NOMBRE: ${MODELO_NOMBRE:-pluma:0.5.0}
       MODELO_VISUAL_LECTURA: ${MODELO_VISUAL_LECTURA:-gemma4:e2b}
       PLUMA_LECTURA_VISUAL_PREVIA: ${PLUMA_LECTURA_VISUAL_PREVIA:-true}
       MAX_TRANSCRIPCION_VISUAL: ${MAX_TRANSCRIPCION_VISUAL:-12000}

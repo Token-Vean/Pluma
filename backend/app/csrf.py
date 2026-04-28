@@ -47,7 +47,11 @@ RUTAS_EXENTAS = {
 }
 
 TOKEN_TTL_SEGUNDOS = 8 * 60 * 60
-MAX_TOKENS_VALIDOS = 16
+# Cap de memoria del set de tokens válidos. Subido a 32 en 0.5.0-beta para
+# tolerar sesiones intensivas (ventana flotante + ventana principal + recargas
+# + reintentos) sin desalojar tokens legítimos antes de que el usuario los use.
+# Sigue siendo finito para que /api/csrf no pueda crecer indefinidamente.
+MAX_TOKENS_VALIDOS = 32
 
 
 def _host_local_valido(host: str | None) -> bool:

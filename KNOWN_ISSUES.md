@@ -1,17 +1,78 @@
 # Problemas conocidos y riesgos residuales
 
 Este documento recoge los problemas conocidos de PlumA en su versión
-**0.3.0-alpha**. Está pensado para que cualquier persona que evalúe
+**0.5.0-beta**. Está pensado para que cualquier persona que evalúe
 la herramienta para un piloto, una auditoría, o un despliegue
 controlado, sepa de antemano qué limitaciones existen.
 
 La presencia de estos puntos no implica que el proyecto sea inseguro:
 significa que la honestidad sobre lo que aún falta es parte del propio
-proyecto. Una alpha responsable los reconoce; una alpha temeraria los
+proyecto. Una beta responsable los reconoce; una beta temeraria los
 oculta.
 
 
-## Modelo de amenaza CSRF
+## Sobre el cambio de alpha a beta en 0.5.0
+
+PlumA ha pasado a denominarse **beta** en 0.5.0 al cumplirse los siguientes
+criterios:
+
+- Cobertura funcional completa de las normas declaradas (ISAD(G), DACS,
+  ISAAR(CPF), ISDF, ISDIAH, RIC simplificado).
+- Postura de seguridad endurecida: modo local estricto por defecto,
+  rechazo de Ollama remoto y exposición en red, sandbox de parsers,
+  CSRF con Origin/Referer + token, contexto de build Docker reducido.
+- Cadena de release con auditoría: SBOM CycloneDX, workflow GHA con
+  Bandit, pip-audit, Trivy y pytest.
+- Documentación bilingüe del frontend, instalación visual en Windows,
+  instaladores en `.bat` / `.sh` para Linux/macOS.
+- Texto íntegro de la AGPL-3 incluido en `LICENSE`.
+
+No es **release candidate** porque sigue pendiente la verificación
+cruzada en Windows / macOS / Linux con archiveros reales y la
+ampliación de cobertura de tests más allá del set actual. Eso se
+documenta abajo.
+
+
+## Resuelto en 0.5.0-beta (cambios respecto a 0.4.15-alpha)
+
+Los siguientes puntos, listados como abiertos en versiones anteriores,
+han sido cerrados en esta release:
+
+- **Texto íntegro de la AGPL-3**: añadido a `LICENSE`. El fichero
+  contiene ahora el aviso de copyright del proyecto y el texto canónico
+  íntegro de la licencia tal como lo publica la FSF en
+  `https://www.gnu.org/licenses/agpl-3.0.txt`.
+- **Cap de tokens CSRF estrecho**: subido de 16 a 32. Tolera sesiones
+  intensivas (ventana flotante + ventana principal + recargas) sin
+  desalojar tokens legítimos.
+- **Concurrencia en `_cache_esquemas`**: protegida con `threading.Lock`
+  y patrón double-checked locking. Ya no depende del semáforo
+  `MAX_PROCESAMIENTOS_SIMULTANEOS=1` para ser segura.
+- **`Pillow.MAX_IMAGE_PIXELS` global del módulo**: encapsulada en un
+  `contextmanager` que restaura el valor previo al salir, incluso si
+  hay excepción. Elimina cualquier fuga potencial.
+- **Botones de copiar en modo flotante**: el bug funcional reportado en
+  el modo Picture-in-Picture (Chromium rechazaba `clipboard.writeText`
+  desde la ventana flotante por checks de foco/activación) se ha
+  corregido con una estrategia en cascada: `navigator.clipboard` de la
+  PiP, fallback al clipboard de la ventana principal, y solo como
+  último recurso `execCommand` sobre el documento principal. El estado
+  visual del botón se controla por clase CSS, no por manipulación de
+  `style.display`.
+- **`importNode` para clonar la plantilla de campo**: sustituye a
+  `cloneNode` para que el `ownerDocument` del nodo creado sea correcto
+  desde el inicio sin necesidad de adopción implícita posterior.
+  Funcionalmente equivalente hoy, más robusto si en el futuro se
+  renderizan campos directamente en la ventana flotante.
+- **Coherencia de versión en `api.py` y `Modelfile`**: añadidos al
+  `security_static_check.py` para que cualquier desfase de versión
+  futuro falle en CI antes de publicar.
+
+
+## Pendientes — esperados para 0.6.0 o release candidate
+
+
+### Modelo de amenaza CSRF (sin cambios respecto a 0.4)
 
 La protección CSRF implementada (`backend/app/csrf.py`) defiende
 correctamente contra el caso clásico de **pestaña vecina maliciosa**:
@@ -33,65 +94,7 @@ del archivero que la usa. No debe exponerse a redes locales con
 varios usuarios sin antes añadir autenticación real.
 
 
-## Concurrencia en `_cache_esquemas`
-
-El extractor (`backend/app/extractor.py`) cachea los esquemas YAML
-parseados en un diccionario en memoria. Este diccionario no tiene
-lock de threading.
-
-En la práctica esto **no es explotable** porque:
-
-1. El endpoint `/api/describir` está protegido por un semáforo
-   (`MAX_PROCESAMIENTOS_SIMULTANEOS=1` por defecto), así que solo
-   hay una petición activa a la vez.
-2. Si cambia ese valor a >1, sigue siendo una race condition trivial
-   que como mucho causa lectura repetida del fichero YAML.
-
-Pero un fuzzer cuidadoso podría detectarlo y reportarlo como hallazgo.
-La solución (añadir un `threading.Lock`) es trivial; está pendiente
-de aplicarse.
-
-
-## Cap de tokens CSRF en uso intensivo
-
-El almacén de tokens CSRF está limitado a `MAX_TOKENS_VALIDOS = 16`
-para evitar que un atacante haga crecer el set sin tope pidiendo
-`/api/csrf` en bucle.
-
-En uso intensivo (ventana flotante + ventana principal + recargas
-+ reintentos en una sesión larga) este cap podría desalojar tokens
-legítimos antiguos antes de que el usuario los use. La aplicación
-detecta el caso (responde 403) y el frontend pide un token nuevo
-automáticamente, así que el efecto es transparente. Pero podría
-producir mensajes de "petición rechazada" transitorios molestos
-en sesiones intensas.
-
-**Mitigación pendiente**: subir el cap a 32-64 o implementar
-expiración por LRU consciente del uso.
-
-
-## `Pillow.MAX_IMAGE_PIXELS` como variable global
-
-El módulo `router.py` configura `Image.MAX_IMAGE_PIXELS` antes de
-abrir cada imagen. Esta variable es **global del módulo PIL**, no
-por instancia.
-
-Esto **no es problemático en el diseño actual** porque el
-procesamiento de imágenes ocurre dentro del sandbox (proceso hijo
-con `multiprocessing.spawn`), que tiene su propia copia de la
-variable.
-
-Sin embargo, si en una versión futura se desactivara el sandbox
-(`USAR_SANDBOX_PARSERS=false`) y se procesara más de una imagen
-simultáneamente desde el proceso principal, podría haber
-condiciones de carrera al modificar la variable. Es un riesgo
-hipotético, no actual.
-
-**Mitigación pendiente**: encapsular la asignación en un
-`contextmanager` con `try/finally` que restaure el valor anterior.
-
-
-## Imágenes Docker no fijadas por digest
+### Imágenes Docker no fijadas por digest
 
 El `Dockerfile` actual referencia las imágenes base por tag:
 
@@ -109,8 +112,8 @@ Si las imágenes en Docker Hub se actualizan o se ven comprometidas,
 el siguiente `docker compose build` producirá una imagen distinta
 sin que el usuario lo note.
 
-**Mitigación pendiente**: una vez exista un build "bueno conocido",
-fijar las imágenes por su digest SHA256:
+**Mitigación pendiente**: una vez exista un build "bueno conocido"
+de la beta, fijar las imágenes por su digest SHA256:
 
 ```
 FROM python:3.12-slim@sha256:XXXXXXXXX...
@@ -118,25 +121,13 @@ OLLAMA_IMAGE=ollama/ollama:0.21.2@sha256:YYYYYYYYY...
 ```
 
 Esto se hará tras el primer ciclo de pruebas con archiveros reales
-para fijar versiones validadas.
+para fijar versiones validadas en la release candidate.
 
 
-## Texto íntegro de la AGPL-3 incompleto
+### Falta de fuzzing y cobertura ampliada de tests
 
-El fichero `LICENSE` contiene el aviso de copyright correcto y la
-referencia a la AGPL-3, pero **NO incluye el texto íntegro** de la
-licencia. Hay una nota explícita en el propio fichero indicando que
-debe completarse antes de hacer pública una release.
-
-**Acción pendiente del mantenedor**: descargar el texto completo
-desde `https://www.gnu.org/licenses/agpl-3.0.txt` y pegarlo en
-`LICENSE` antes de etiquetar la versión `v0.3.0-alpha` en GitHub.
-
-
-## Falta de fuzzing y tests profundos
-
-Los tests actuales (`tests/test_security_basics.py`) son **6 tests
-mínimos** que cubren los vectores de ataque más obvios:
+Los tests actuales (`tests/`) son **29 tests** que cubren los vectores
+de ataque más obvios y la configuración de release:
 
 - Extensión falseada (binario llamado `.pdf`).
 - ZIP no-DOCX rechazado.
@@ -144,25 +135,27 @@ mínimos** que cubren los vectores de ataque más obvios:
 - CSV injection con `=` y `+`.
 - JSON malformado del LLM.
 - Idioma del prompt.
+- Política de modo local estricto.
+- Configuración de release.
+- Exportadores básicos para DACS y RIC.
 
-Para una release pública estable harían falta:
+Para una release candidate harían falta:
 
-- Tests de regresión sobre los exportadores (EAD3, EAC-CPF, JSON, CSV).
+- Tests de regresión completos sobre los exportadores (EAD3, EAC-CPF, JSON, CSV).
 - Fuzzing con corpus de PDFs, DOCX e imágenes patológicos.
 - Tests de integración con un Ollama real en CI.
 - Cobertura de los casos edge del extractor (LLM devolviendo tipos raros).
 
-Esto está fuera del alcance de la alpha y previsto para versiones
-posteriores.
+Esto está en el plan para la 0.6.0 o release candidate.
 
 
-## No verificado en Windows ni macOS
+### Verificación cruzada en Windows / macOS / Linux
 
 PlumA se ha desarrollado y probado primariamente en **Windows con
-Docker Desktop**. La compatibilidad declarada con Linux y macOS está
-basada en que el código y la infraestructura (Docker, Python) son
-multiplataforma, pero **no se ha probado activamente en estos
-sistemas**.
+Docker Desktop**. La compatibilidad con Linux y macOS está basada en
+que el código y la infraestructura (Docker, Python) son
+multiplataforma, pero **la beta es el primer momento en el que se
+abre a probar activamente en estos sistemas**.
 
 Casos previsibles donde podría haber problemas:
 
@@ -174,11 +167,11 @@ Casos previsibles donde podría haber problemas:
   tener incompatibilidades sutiles en macOS (que usa `bash` 3.2 por
   defecto).
 
-**Mitigación pendiente**: alpha cerrado con archiveros que usen los
-tres sistemas, recoger feedback, ajustar.
+**Plan**: durante el ciclo beta se invitará a archiveros con los tres
+sistemas a un piloto cerrado, recoger feedback, ajustar.
 
 
-## Apagado de Ollama en perfil bundled
+### Apagado de Ollama en perfil bundled
 
 El endpoint `POST /api/apagar` solo termina el proceso de la
 aplicación. **No detiene el contenedor de Ollama** en el perfil
@@ -194,9 +187,27 @@ hasta que el usuario ejecute `detener.bat` / `detener.sh` o
 (varios GB con un modelo cargado), hay que ejecutar el script de
 detención manualmente.
 
+Nota: desde 0.4.15 el botón de apagado UI está desactivado por
+defecto (`PERMITIR_APAGADO_UI=false`), así que en una instalación
+estándar este comportamiento no se manifiesta — el usuario apaga
+PlumA con los scripts.
 
-## Modo personalizado
 
-El modo personalizado ya permite seleccionar campos visibles y exportables desde la interfaz. Si se aplica después de procesar un documento, actúa como filtro visual y de exportación. Si se pulsa **Reprocesar** con el modo personalizado activo, la selección se envía al backend para limitar también la extracción del modelo.
+### Modo personalizado
 
-Limitación conocida: si se cambia de norma, conviene reprocesar antes de reutilizar una selección personalizada, porque las claves de campo pueden no coincidir entre normas.
+El modo personalizado permite seleccionar campos visibles y exportables
+desde la interfaz. Si se aplica después de procesar un documento, actúa
+como filtro visual y de exportación. Si se pulsa **Reprocesar** con el
+modo personalizado activo, la selección se envía al backend para
+limitar también la extracción del modelo.
+
+Limitación conocida: si se cambia de norma, conviene reprocesar antes
+de reutilizar una selección personalizada, porque las claves de campo
+pueden no coincidir entre normas.
+
+
+## Cómo reportar nuevos problemas
+
+Los issues van al repositorio público de GitHub. Si el problema tiene
+implicaciones de seguridad, ver `SECURITY.md` para el procedimiento
+de divulgación responsable.

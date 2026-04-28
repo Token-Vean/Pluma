@@ -16,6 +16,7 @@ formato ambiguo se rechaza en lugar de enviarlo al parser documental.
 from __future__ import annotations
 
 import base64
+import contextlib
 import io
 import logging
 import os
@@ -424,14 +425,32 @@ def _extraer_texto_docx(contenido: bytes) -> str:
     return "\n".join(partes).strip()
 
 
+@contextlib.contextmanager
+def _max_image_pixels(valor: int):
+    """
+    Encapsula la asignación a Image.MAX_IMAGE_PIXELS para restaurar el valor
+    previo al salir, incluso si hay excepción.
+
+    Image.MAX_IMAGE_PIXELS es global del módulo PIL, no por instancia. En el
+    diseño actual el procesamiento ocurre dentro del sandbox (proceso hijo),
+    por lo que no había riesgo real, pero encapsularlo elimina cualquier
+    posibilidad de fuga si en una versión futura se desactivara el sandbox o
+    se procesara más de una imagen simultáneamente desde el mismo proceso.
+    """
+    from PIL import Image
+    previo = Image.MAX_IMAGE_PIXELS
+    Image.MAX_IMAGE_PIXELS = valor
+    try:
+        yield
+    finally:
+        Image.MAX_IMAGE_PIXELS = previo
+
+
 def _validar_imagen(contenido: bytes) -> bytes:
     from PIL import Image
 
-    # Convierte el warning de bomba de descompresión en error.
-    Image.MAX_IMAGE_PIXELS = PIXELS_MAXIMOS_IMAGEN
-
     try:
-        with warnings.catch_warnings():
+        with _max_image_pixels(PIXELS_MAXIMOS_IMAGEN), warnings.catch_warnings():
             warnings.simplefilter("error", Image.DecompressionBombWarning)
             with Image.open(io.BytesIO(contenido)) as img_probe:
                 img_probe.verify()

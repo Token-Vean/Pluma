@@ -1,7 +1,7 @@
 # =============================================================================
 # Modelfile — PlumA local archival assistant
 # -----------------------------------------------------------------------------
-# v0.4.16-alpha: structural template + anti-example-leakage controls.
+# v0.5.0-beta: structural template + anti-example-leakage controls.
 #
 # IMPORTANT:
 #   This Modelfile includes only abstract placeholders, never concrete sample

@@ -588,6 +588,11 @@ main {
   color: var(--verde) !important;
   border-color: var(--verde) !important;
 }
+/* Cambio de icono por clase en lugar de manipular style.display.
+   Si un setTimeout falla, los iconos vuelven solos al quitar la clase. */
+.boton-copiar .icono-ok { display: none; }
+.boton-copiar.copiado .icono-copiar { display: none; }
+.boton-copiar.copiado .icono-ok { display: block; }
 
 .campo-evidencia {
   margin-top: 10px;

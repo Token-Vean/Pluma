@@ -99,7 +99,7 @@ function Test-HostOllamaModel([string]$modelName) {
 # Valores funcionales permitidos.
 Set-Or-Add "PUERTO" "8082"
 if ($script:content -notmatch "(?m)^\s*MODELO_BASE\s*=") { Set-Or-Add "MODELO_BASE" "gemma4:e2b" }
-Set-Or-Add "MODELO_NOMBRE" "pluma:0.4.16"
+Set-Or-Add "MODELO_NOMBRE" "pluma:0.5.0"
 
 $modelBase = Get-EnvValue "MODELO_BASE" "gemma4:e2b"
 if (Test-HostOllamaModel $modelBase) {

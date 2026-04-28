@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import re
+import threading
 import uuid
 import unicodedata
 from dataclasses import asdict, dataclass, field
@@ -137,6 +138,11 @@ class Propuesta:
 # =============================================================================
 
 _cache_esquemas: dict[tuple[Path, str | None], Esquema] = {}
+# Lock para el cache de esquemas. En la práctica `MAX_PROCESAMIENTOS_SIMULTANEOS=1`
+# (ver api.py) ya serializa las peticiones a /api/describir, así que no había
+# carrera explotable. Pero la fuga es trivial de cerrar y la añadimos en 0.5.0-beta
+# para no depender del semáforo y para evitar cualquier hallazgo de auditoría.
+_cache_esquemas_lock = threading.Lock()
 
 
 def cargar_esquema(ruta: str | Path, perfil: str | None = None) -> Esquema:
@@ -149,8 +155,10 @@ def cargar_esquema(ruta: str | Path, perfil: str | None = None) -> Esquema:
     """
     ruta = Path(ruta)
     clave_cache = (ruta, perfil)
-    if clave_cache in _cache_esquemas:
-        return _cache_esquemas[clave_cache]
+    # Lectura rápida sin lock; si hay hit, devolvemos.
+    cacheado = _cache_esquemas.get(clave_cache)
+    if cacheado is not None:
+        return cacheado
 
     with ruta.open("r", encoding="utf-8") as f:
         data = yaml.safe_load(f)
@@ -208,7 +216,13 @@ def cargar_esquema(ruta: str | Path, perfil: str | None = None) -> Esquema:
         idioma=str(data["idioma"]),
         elementos=elementos,
     )
-    _cache_esquemas[clave_cache] = esquema
+    with _cache_esquemas_lock:
+        # Otra petición podría haber poblado la entrada mientras parseábamos;
+        # respetamos esa instancia para no duplicar objetos en memoria.
+        existente = _cache_esquemas.get(clave_cache)
+        if existente is not None:
+            return existente
+        _cache_esquemas[clave_cache] = esquema
     return esquema
 
 

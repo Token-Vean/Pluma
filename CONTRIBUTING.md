@@ -36,12 +36,27 @@ previamente para conversar antes de dedicar tiempo a preparar un parche.
 
 ## Licencia de las aportaciones
 
-El proyecto se distribuye bajo AGPL-3.0-or-later. Cualquier
+El proyecto se distribuye bajo **GNU AGPL-3.0-or-later**. Cualquier
 aportación que se incorpore al repositorio deberá ser compatible con
-esta licencia. Si en el futuro se abre el proyecto a contribuciones
-externas, se establecerá un proceso formal para la firma de un
-Contributor License Agreement (CLA), cuyo borrador ya existe en el
-repositorio.
+esta licencia.
+
+Cuando se abra el proyecto a contribuciones externas, se requerirá la
+firma del **Contributor License Agreement (CLA) v2.0** del Proyecto,
+disponible en el fichero `CLA.md`. Es importante que cualquier
+contribuyente potencial lea el CLA con atención antes de invertir
+tiempo en preparar un parche, porque su contenido es relevante:
+
+- El Proyecto distribuye y seguirá distribuyendo bajo AGPL.
+- El CLA permite además al Titular del Proyecto **sublicenciar las
+  contribuciones bajo otras licencias** (incluyendo licencias
+  comerciales propietarias) en el futuro, como vía de sostenibilidad
+  económica del desarrollo. La rama AGPL pública nunca se cierra.
+- Las contribuciones desde una institución o empresa requieren además
+  la firma del **Anexo A — Acuerdo Corporativo de Contribución**.
+
+Si estos términos no son aceptables para tu caso, conviene saberlo
+antes de escribir código. El intercambio de issues, ideas y feedback
+público no requiere CLA.
 
 ## Contacto
 

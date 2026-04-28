@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://ollama:11434")
 PLUMA_OLLAMA_MODE = os.getenv("PLUMA_OLLAMA_MODE", "container")
 MODELO_BASE = os.getenv("MODELO_BASE", "gemma4:e2b")
-MODELO_NOMBRE = os.getenv("MODELO_NOMBRE", "pluma:0.4.16")
+MODELO_NOMBRE = os.getenv("MODELO_NOMBRE", "pluma:0.5.0")
 MODELFILE_PATH = Path(os.getenv("MODELFILE_PATH", "/app/Modelfile"))
 PERFIL = os.getenv("PERFIL", "bundled-local-locked").strip().lower()
 

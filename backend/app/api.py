@@ -43,7 +43,7 @@ logger = logging.getLogger(__name__)
 # Configuración
 # =============================================================================
 
-MODELO = os.getenv("MODELO_NOMBRE", "pluma:0.4.16")
+MODELO = os.getenv("MODELO_NOMBRE", "pluma:0.5.0")
 DIR_ESQUEMAS = Path(os.getenv("DIR_ESQUEMAS", "/app/schemas"))
 RUTA_CATALOGO_TIPOS = DIR_ESQUEMAS / "tipos-documentales.yaml"
 
