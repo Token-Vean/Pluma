@@ -32,11 +32,12 @@ import io
 import json
 import re
 import unicodedata
+from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 from xml.dom import minidom
-from xml.etree.ElementTree import Element, SubElement, register_namespace, tostring
+from xml.etree.ElementTree import Element, SubElement, indent, register_namespace, tostring
 
 import yaml
 
@@ -150,12 +151,14 @@ def _valor_como_lista(valor: Any) -> list[str]:
 
 
 def _pretty_xml(elemento: Element) -> bytes:
-    """Serializa un Element a XML indentado."""
-    crudo = tostring(elemento, encoding="utf-8")
-    parseado = minidom.parseString(crudo)
-    pretty = parseado.toprettyxml(indent="  ", encoding="utf-8")
-    # Eliminar la línea vacía que minidom añade entre declaración y raíz
-    return b"\n".join(linea for linea in pretty.split(b"\n") if linea.strip())
+    """Serializa un ElementTree a XML indentado sin reparsear con minidom.
+
+    El árbol se clona antes de aplicar la indentación para evitar efectos
+    laterales si el elemento raíz se reutiliza después de exportar.
+    """
+    elemento_indentado = deepcopy(elemento)
+    indent(elemento_indentado, space="  ")
+    return tostring(elemento_indentado, encoding="utf-8", xml_declaration=True)
 
 
 # =============================================================================

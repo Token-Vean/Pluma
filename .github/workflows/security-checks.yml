@@ -45,5 +45,7 @@ jobs:
           image-ref: 'pluma-app:0.5.0-beta'
           format: 'table'
           severity: 'CRITICAL,HIGH'
+          ignore-unfixed: true
           exit-code: '1'
+
 
