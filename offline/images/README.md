@@ -1,8 +1,5 @@
 # Imágenes Docker offline
 
-Coloca aquí, solo en paquetes de distribución offline, las imágenes Docker exportadas con `docker image save`, por ejemplo:
+Carpeta reservada para paquetes de distribución offline.
 
-- `pluma-app-0.5.0-beta.tar`
-- `ollama-0.21.2.tar`
-
-Esta carpeta se mantiene vacía en el repositorio fuente. No subas imágenes `.tar` al repositorio.
+En el repositorio fuente debe conservarse solo este archivo marcador. No subas imágenes Docker `.tar` ni `.tar.gz` al repositorio.

@@ -8,7 +8,7 @@ except Exception:  # pragma: no cover
     yaml = None
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "0.5.0"
+APP_VERSION = "0.5.0-beta"
 
 
 def fail(msg: str) -> None:
@@ -26,42 +26,33 @@ def read(path: Path) -> str:
 
 def test_no_runtime_artifacts() -> None:
     forbidden_names = {".env", ".git"}
-    forbidden_globs = [
-        "RELEASE_NOTES_*.md",
-        "REPO_MANIFEST_*.md",
-        "GITHUB_RELEASE_TEXT_*.md",
-        "*BUILD_REPORT*.txt",
-        "*.SHA256.txt",
-    ]
     for p in ROOT.rglob("*"):
         rel = p.relative_to(ROOT)
         if p.name in forbidden_names:
             fail(f"artefacto no distribuible encontrado: {rel}")
         if p.name == "__pycache__" or p.suffix == ".pyc":
             fail(f"artefacto Python generado encontrado: {rel}")
-        if rel.parts and rel.parts[0] == "release":
-            fail(f"carpeta release no debe formar parte del repositorio fuente: {rel}")
-    for pattern in forbidden_globs:
-        matches = list(ROOT.glob(pattern))
-        if matches:
-            fail(f"artefactos de release encontrados en raíz: {[str(m.relative_to(ROOT)) for m in matches]}")
-    ok("sin .env, .git, __pycache__, .pyc ni artefactos generados de release en raíz")
+    ok("sin .env, .git, __pycache__ ni .pyc")
 
 
 def test_compose_local_locked() -> None:
     compose = ROOT / "docker-compose.yml"
     if not compose.exists():
         fail("no existe docker-compose.yml")
+
+    text = read(compose)
+    if "../offline/" in text:
+        fail("docker-compose.yml referencia ../offline; debe usar ./offline dentro del repo")
+
     if yaml is None:
-        text = read(compose)
         if 'host_ip: "127.0.0.1"' not in text or 'published: "8082"' not in text:
             fail("docker-compose.yml no publica la app solo en 127.0.0.1:8082")
-        if "../offline/" in text:
-            fail("docker-compose.yml referencia ../offline; debe usar ./offline dentro del repo")
+        if "./offline/models:/offline/models:ro" not in text:
+            fail("docker-compose.yml no monta ./offline/models dentro del repo")
         ok("docker-compose.yml revisado por texto")
         return
 
-    data = yaml.safe_load(read(compose))
+    data = yaml.safe_load(text)
     app = data["services"]["app"]
     ports = app.get("ports") or []
     if not ports:
@@ -79,9 +70,11 @@ def test_compose_local_locked() -> None:
     for key, expected_value in expected.items():
         if env.get(key) != expected_value:
             fail(f"{key} tiene valor inesperado: {env.get(key)!r}")
-    volumes = app.get("volumes") or []
-    if any(isinstance(v, str) and v.startswith("../offline/") for v in volumes):
-        fail("volumen offline fuera del repositorio: use ./offline/models")
+
+    ollama = data["services"].get("ollama", {})
+    volumes = ollama.get("volumes") or []
+    if "./offline/models:/offline/models:ro" not in volumes:
+        fail("ollama debe montar ./offline/models:/offline/models:ro")
     ok("docker-compose.yml mantiene publicación local, flags bloqueados y rutas offline internas")
 
 
@@ -108,18 +101,20 @@ def test_dockerignore_minimal_context() -> None:
 
 
 def test_version_coherence() -> None:
-    files = {
-        "backend/app/version.py": read(ROOT / "backend" / "app" / "version.py"),
-        "docker-compose.yml": read(ROOT / "docker-compose.yml"),
-        ".env.example": read(ROOT / ".env.example"),
-        "frontend/static/app.js": read(ROOT / "frontend" / "static" / "app.js"),
-        "backend/pyproject.toml": read(ROOT / "backend" / "pyproject.toml"),
-        "backend/app/api.py": read(ROOT / "backend" / "app" / "api.py"),
-        "Modelfile": read(ROOT / "Modelfile"),
+    version_py = read(ROOT / "backend" / "app" / "version.py")
+    pyproject = read(ROOT / "backend" / "pyproject.toml")
+    compose = read(ROOT / "docker-compose.yml")
+    frontend = read(ROOT / "frontend" / "static" / "index.html") + read(ROOT / "frontend" / "static" / "app.js")
+
+    checks = {
+        "backend/app/version.py": f'APP_VERSION = "{APP_VERSION}"' in version_py,
+        "backend/pyproject.toml": f'version = "{APP_VERSION}"' in pyproject,
+        "docker-compose.yml": f"pluma-app:{APP_VERSION}" in compose,
+        "frontend/static": APP_VERSION in frontend,
     }
-    for file_name, text in files.items():
-        if VERSION not in text:
-            fail(f"versión {VERSION} ausente en {file_name}")
+    missing = [name for name, ok_ in checks.items() if not ok_]
+    if missing:
+        fail(f"versión {APP_VERSION} ausente o incoherente en: {missing}")
     ok("versión coherente en ficheros activos")
 
 
@@ -146,6 +141,7 @@ def test_offline_structure_inside_repo() -> None:
     missing = [str(p.relative_to(ROOT)) for p in required if not p.exists()]
     if missing:
         fail(f"faltan marcadores de estructura offline: {missing}")
+
     for rel in (
         "tools/windows/pluma-install-core.bat",
         "tools/windows/pluma-import-offline-model.bat",

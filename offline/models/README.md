@@ -1,5 +1,5 @@
 # Modelos offline
 
-Coloca aquí, solo en paquetes de distribución offline, modelos GGUF u otros activos de modelo necesarios para instalar PlumA sin descarga externa.
+Carpeta reservada para paquetes de distribución offline.
 
-Esta carpeta se mantiene vacía en el repositorio fuente. No subas modelos `.gguf`, `.bin` ni pesos de modelo al repositorio.
+En el repositorio fuente debe conservarse solo este archivo marcador. No subas modelos `.gguf`, `.bin` ni pesos de modelo al repositorio.
