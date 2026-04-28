@@ -1,4 +1,4 @@
-fastapi==0.136.0
+fastapi==0.136.1
 uvicorn[standard]==0.45.0
 starlette==1.0.0
 python-multipart==0.0.26
