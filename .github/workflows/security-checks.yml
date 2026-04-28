@@ -52,7 +52,7 @@ jobs:
       - name: Build local image
         run: docker compose build app
       - name: Trivy image scan
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: 'pluma-app:0.4.16-alpha'
           format: 'table'
