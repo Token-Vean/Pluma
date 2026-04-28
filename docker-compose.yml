@@ -25,7 +25,7 @@ services:
     container_name: pluma-ollama
     volumes:
       - ollama-models:/root/.ollama
-      - ../offline/models:/offline/models:ro
+      - ./offline/models:/offline/models:ro
     expose:
       - "11434"
     restart: unless-stopped

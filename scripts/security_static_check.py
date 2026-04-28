@@ -8,6 +8,7 @@ except Exception:  # pragma: no cover
     yaml = None
 
 ROOT = Path(__file__).resolve().parents[1]
+VERSION = "0.5.0"
 
 
 def fail(msg: str) -> None:
@@ -25,13 +26,26 @@ def read(path: Path) -> str:
 
 def test_no_runtime_artifacts() -> None:
     forbidden_names = {".env", ".git"}
+    forbidden_globs = [
+        "RELEASE_NOTES_*.md",
+        "REPO_MANIFEST_*.md",
+        "GITHUB_RELEASE_TEXT_*.md",
+        "*BUILD_REPORT*.txt",
+        "*.SHA256.txt",
+    ]
     for p in ROOT.rglob("*"):
         rel = p.relative_to(ROOT)
         if p.name in forbidden_names:
             fail(f"artefacto no distribuible encontrado: {rel}")
         if p.name == "__pycache__" or p.suffix == ".pyc":
             fail(f"artefacto Python generado encontrado: {rel}")
-    ok("sin .env, .git, __pycache__ ni .pyc")
+        if rel.parts and rel.parts[0] == "release":
+            fail(f"carpeta release no debe formar parte del repositorio fuente: {rel}")
+    for pattern in forbidden_globs:
+        matches = list(ROOT.glob(pattern))
+        if matches:
+            fail(f"artefactos de release encontrados en raíz: {[str(m.relative_to(ROOT)) for m in matches]}")
+    ok("sin .env, .git, __pycache__, .pyc ni artefactos generados de release en raíz")
 
 
 def test_compose_local_locked() -> None:
@@ -42,6 +56,8 @@ def test_compose_local_locked() -> None:
         text = read(compose)
         if 'host_ip: "127.0.0.1"' not in text or 'published: "8082"' not in text:
             fail("docker-compose.yml no publica la app solo en 127.0.0.1:8082")
+        if "../offline/" in text:
+            fail("docker-compose.yml referencia ../offline; debe usar ./offline dentro del repo")
         ok("docker-compose.yml revisado por texto")
         return
 
@@ -63,7 +79,10 @@ def test_compose_local_locked() -> None:
     for key, expected_value in expected.items():
         if env.get(key) != expected_value:
             fail(f"{key} tiene valor inesperado: {env.get(key)!r}")
-    ok("docker-compose.yml mantiene publicación local y flags bloqueados")
+    volumes = app.get("volumes") or []
+    if any(isinstance(v, str) and v.startswith("../offline/") for v in volumes):
+        fail("volumen offline fuera del repositorio: use ./offline/models")
+    ok("docker-compose.yml mantiene publicación local, flags bloqueados y rutas offline internas")
 
 
 def test_public_env_does_not_expose_dangerous_flags() -> None:
@@ -90,17 +109,52 @@ def test_dockerignore_minimal_context() -> None:
 
 def test_version_coherence() -> None:
     files = {
-        "version.py": read(ROOT / "backend" / "app" / "version.py"),
+        "backend/app/version.py": read(ROOT / "backend" / "app" / "version.py"),
         "docker-compose.yml": read(ROOT / "docker-compose.yml"),
         ".env.example": read(ROOT / ".env.example"),
         "frontend/static/app.js": read(ROOT / "frontend" / "static" / "app.js"),
+        "backend/pyproject.toml": read(ROOT / "backend" / "pyproject.toml"),
         "backend/app/api.py": read(ROOT / "backend" / "app" / "api.py"),
         "Modelfile": read(ROOT / "Modelfile"),
     }
     for file_name, text in files.items():
-        if "0.5.0" not in text:
-            fail(f"versión 0.5.0 ausente en {file_name}")
+        if VERSION not in text:
+            fail(f"versión {VERSION} ausente en {file_name}")
     ok("versión coherente en ficheros activos")
+
+
+def test_shutdown_button_policy() -> None:
+    html = read(ROOT / "frontend" / "static" / "index.html")
+    js = read(ROOT / "frontend" / "static" / "app.js")
+    if 'id="boton-cerrar-interfaz"' not in html:
+        fail("falta botón visible de cierre de interfaz")
+    if 'id="boton-apagar"' not in html or 'style="display:none"' not in html:
+        fail("el botón de detener debe existir pero estar oculto por defecto")
+    if "function cerrarInterfaz()" not in js:
+        fail("falta controlador cerrarInterfaz")
+    if "apagado_ui_permitido === true" not in js:
+        fail("el botón de detener solo debe mostrarse si el backend lo permite")
+    ok("UI separa cierre de interfaz y detención del servidor")
+
+
+def test_offline_structure_inside_repo() -> None:
+    required = [
+        ROOT / "offline" / "images" / "README.md",
+        ROOT / "offline" / "models" / "README.md",
+        ROOT / "offline" / "models" / "Modelfile.template.parameters",
+    ]
+    missing = [str(p.relative_to(ROOT)) for p in required if not p.exists()]
+    if missing:
+        fail(f"faltan marcadores de estructura offline: {missing}")
+    for rel in (
+        "tools/windows/pluma-install-core.bat",
+        "tools/windows/pluma-import-offline-model.bat",
+        "tools/windows/pluma-load-offline-assets.bat",
+    ):
+        text = read(ROOT / rel)
+        if "%PLUMA_DIR%\\.." in text:
+            fail(f"{rel} calcula offline fuera del repo")
+    ok("estructura offline conservada dentro del repositorio")
 
 
 if __name__ == "__main__":
@@ -109,4 +163,6 @@ if __name__ == "__main__":
     test_public_env_does_not_expose_dangerous_flags()
     test_dockerignore_minimal_context()
     test_version_coherence()
-    print("\nComprobaciones estáticas de release superadas.")
+    test_shutdown_button_policy()
+    test_offline_structure_inside_repo()
+    print("\nComprobaciones estáticas de repositorio superadas.")

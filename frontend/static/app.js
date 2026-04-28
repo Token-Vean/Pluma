@@ -156,6 +156,9 @@ const I18N = {
     'footer.license': 'Licencia AGPL-3.0',
     'float.title': 'Abrir en ventana flotante sobre otras aplicaciones',
     'float.button': 'Ventana flotante',
+    'closeInterface.title': 'Cerrar solo la interfaz',
+    'closeInterface.button': 'Cerrar',
+    'closeInterface.fallback': 'Si el navegador no cierra la pestaña automáticamente, ciérrela manualmente. El servidor local seguirá activo.',
     'shutdown.title': 'Apagar el servidor local',
     'shutdown.button': 'Apagar',
     'shutdown.confirm': 'Se detendrá el servidor local de la aplicación. En modo bundled, Ollama puede seguir activo hasta ejecutar detener.bat/detener.sh. ¿Continuar?',
@@ -267,6 +270,9 @@ const I18N = {
     'footer.license': 'AGPL-3.0 license',
     'float.title': 'Open as a floating window over other applications',
     'float.button': 'Floating window',
+    'closeInterface.title': 'Close the interface only',
+    'closeInterface.button': 'Close',
+    'closeInterface.fallback': 'If the browser does not close the tab automatically, close it manually. The local server will remain active.',
     'shutdown.title': 'Shut down the local server',
     'shutdown.button': 'Shut down',
     'shutdown.confirm': 'This will stop the local application server. In bundled mode, Ollama may remain running until detener.bat/detener.sh is executed. Continue?',
@@ -619,10 +625,16 @@ async function aplicarPoliticaSeguridadUI() {
     if (!r.ok) return;
     const data = await r.json();
     const boton = $('boton-apagar');
-    if (boton && data.apagado_ui_permitido === false) {
-      boton.style.display = 'none';
-      boton.disabled = true;
-      boton.setAttribute('aria-hidden', 'true');
+    if (boton) {
+      if (data.apagado_ui_permitido === true) {
+        boton.style.display = '';
+        boton.disabled = false;
+        boton.removeAttribute('aria-hidden');
+      } else {
+        boton.style.display = 'none';
+        boton.disabled = true;
+        boton.setAttribute('aria-hidden', 'true');
+      }
     }
   } catch (err) {
     console.warn('No se pudo consultar la política local de seguridad:', err);
@@ -1610,8 +1622,25 @@ function aplicarFiltroPersonalizado() {
 
 
 /* =============================================================================
-   8c. Apagado local desde la interfaz
+   8c. Cierre de interfaz y apagado local
    ========================================================================== */
+
+function cerrarInterfaz() {
+  const docActual = documentoActivo();
+  const winActual = (docActual && docActual.defaultView) ? docActual.defaultView : window;
+
+  try {
+    winActual.close();
+  } catch (err) {
+    console.warn('No se pudo cerrar la ventana desde la interfaz:', err);
+  }
+
+  setTimeout(() => {
+    if (!winActual.closed) {
+      toast(t('closeInterface.fallback'), '', docActual);
+    }
+  }, 250);
+}
 
 async function apagarAplicacion() {
   const boton = $('boton-apagar');
@@ -1759,6 +1788,7 @@ function inicializarControles() {
   });
 
   // Apagado local
+  $('boton-cerrar-interfaz')?.addEventListener('click', cerrarInterfaz);
   $('boton-apagar').addEventListener('click', apagarAplicacion);
 
   // Selector de norma

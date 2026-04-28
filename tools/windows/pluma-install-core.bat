@@ -3,7 +3,7 @@ setlocal EnableExtensions EnableDelayedExpansion
 call "%~dp0pluma-env.bat" >nul 2>nul
 set "SCRIPT_DIR=%~dp0"
 for %%I in ("%SCRIPT_DIR%\..\..") do set "PLUMA_DIR=%%~fI"
-for %%I in ("%PLUMA_DIR%\..") do set "ROOT_DIR=%%~fI"
+set "ROOT_DIR=%PLUMA_DIR%"
 cd /d "%PLUMA_DIR%"
 echo Aplicando configuracion local bloqueada...
 powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%enforce-local-config.ps1"

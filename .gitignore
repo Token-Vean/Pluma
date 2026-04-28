@@ -119,3 +119,12 @@ ollama-models/
 # =============================================================================
 $RECYCLE.BIN/
 *.lnk
+
+# =============================================================================
+# Payloads offline pesados: la estructura se conserva, los binarios no
+# =============================================================================
+offline/images/*.tar
+offline/images/*.tar.gz
+offline/models/*.gguf
+offline/models/*.bin
+offline/models/Modelfile.offline.generated

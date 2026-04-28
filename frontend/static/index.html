@@ -42,7 +42,15 @@
       </select>
     </label>
 
-    <button class="boton-cabecera boton-apagar" id="boton-apagar" title="Apagar el servidor local" data-i18n-title="shutdown.title">
+    <button class="boton-cabecera" id="boton-cerrar-interfaz" title="Cerrar solo la interfaz" data-i18n-title="closeInterface.title">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 4 L12 12"/>
+        <path d="M12 4 L4 12"/>
+      </svg>
+      <span data-i18n="closeInterface.button">Cerrar</span>
+    </button>
+
+    <button class="boton-cabecera boton-apagar" id="boton-apagar" style="display:none" aria-hidden="true" disabled title="Apagar el servidor local" data-i18n-title="shutdown.title">
       <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
         <path d="M8 2 L8 8"/>
         <path d="M4.5 4.5 A5 5 0 1 0 11.5 4.5"/>
