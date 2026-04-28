@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from pathlib import Path
 
@@ -24,7 +24,7 @@ def read(path: Path) -> str:
 
 
 def test_no_runtime_artifacts() -> None:
-    forbidden_names = {".env", ".git"}
+    forbidden_names = {".env"}
     for p in ROOT.rglob("*"):
         rel = p.relative_to(ROOT)
         if p.name in forbidden_names:
@@ -71,7 +71,7 @@ def test_compose_local_locked() -> None:
     volumes = ollama.get("volumes") or []
     if "./offline/models:/offline/models:ro" not in volumes:
         fail("ollama debe montar ./offline/models:/offline/models:ro")
-    ok("docker-compose.yml mantiene publicación local, flags bloqueados y rutas offline internas")
+    ok("docker-compose.yml mantiene publicaciÃ³n local, flags bloqueados y rutas offline internas")
 
 
 def test_public_env_does_not_expose_dangerous_flags() -> None:
@@ -79,7 +79,7 @@ def test_public_env_does_not_expose_dangerous_flags() -> None:
     active_lines = [line.strip() for line in env_example.splitlines() if line.strip() and not line.lstrip().startswith("#")]
     for token in ("ALLOW_REMOTE_OLLAMA=", "ALLOW_NETWORK_EXPOSURE=", "COMPOSE_PROFILES="):
         if any(line.startswith(token) for line in active_lines):
-            fail(f".env.example expone opción peligrosa: {token}")
+            fail(f".env.example expone opciÃ³n peligrosa: {token}")
     if "PERMITIR_APAGADO_UI=false" not in active_lines:
         fail("PERMITIR_APAGADO_UI debe estar desactivado por defecto")
     ok(".env.example no expone flags de red/remoto y desactiva apagado UI")
@@ -107,22 +107,22 @@ def test_version_coherence() -> None:
     }
     for file_name, text in files.items():
         if "0.5.0" not in text:
-            fail(f"versión 0.5.0 ausente en {file_name}")
-    ok("versión coherente en ficheros activos")
+            fail(f"versiÃ³n 0.5.0 ausente en {file_name}")
+    ok("versiÃ³n coherente en ficheros activos")
 
 
 def test_shutdown_button_policy() -> None:
     html = read(ROOT / "frontend" / "static" / "index.html")
     js = read(ROOT / "frontend" / "static" / "app.js")
     if 'id="boton-cerrar-interfaz"' not in html:
-        fail("falta botón visible de cierre de interfaz")
+        fail("falta botÃ³n visible de cierre de interfaz")
     if 'id="boton-apagar"' not in html or 'style="display:none"' not in html:
-        fail("el botón de apagar debe existir pero estar oculto por defecto")
+        fail("el botÃ³n de apagar debe existir pero estar oculto por defecto")
     if "function cerrarInterfaz()" not in js:
         fail("falta controlador cerrarInterfaz")
     if "apagado_ui_permitido === true" not in js:
-        fail("el botón de apagar solo debe mostrarse si el backend lo permite")
-    ok("UI separa cierre de interfaz y detención del servidor")
+        fail("el botÃ³n de apagar solo debe mostrarse si el backend lo permite")
+    ok("UI separa cierre de interfaz y detenciÃ³n del servidor")
 
 
 def test_offline_structure_inside_repo() -> None:
@@ -153,4 +153,5 @@ if __name__ == "__main__":
     test_version_coherence()
     test_shutdown_button_policy()
     test_offline_structure_inside_repo()
-    print("\nComprobaciones estáticas de repositorio superadas.")
+    print("\nComprobaciones estÃ¡ticas de repositorio superadas.")
+

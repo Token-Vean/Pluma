@@ -1,4 +1,4 @@
-name: security-checks
+﻿name: security-checks
 
 on:
   pull_request:
@@ -40,9 +40,10 @@ jobs:
       - name: Build local image
         run: docker compose build app
       - name: Trivy image scan
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.35.0
         with:
           image-ref: 'pluma-app:0.5.0-beta'
           format: 'table'
           severity: 'CRITICAL,HIGH'
           exit-code: '1'
+
