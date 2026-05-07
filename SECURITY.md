@@ -10,10 +10,10 @@ recibirlas.
 Mientras el proyecto se encuentre en fase pre-1.0, solo la última
 versión publicada recibe parches de seguridad.
 
-| Versión    | Estado                      |
-|------------|-----------------------------|
-| 0.4.x      | Soporte activo (alpha)      |
-| 0.3.x y anteriores | Sin soporte          |
+| Versión              | Estado                      |
+|----------------------|-----------------------------|
+| 0.5.x                | Soporte activo (beta)       |
+| 0.4.x y anteriores   | Sin soporte                 |
 
 ## Cómo reportar una vulnerabilidad
 

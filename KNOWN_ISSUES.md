@@ -126,8 +126,10 @@ para fijar versiones validadas en la release candidate.
 
 ### Falta de fuzzing y cobertura ampliada de tests
 
-Los tests actuales (`tests/`) son **29 tests** que cubren los vectores
-de ataque más obvios y la configuración de release:
+Los tests actuales (`tests/`) son **30 tests** que pasan en CI (más
+2 saltados en entornos sin POSIX `resource.RLIMIT_AS`, esperado en
+Windows nativo y en algunos contenedores) y cubren los vectores de
+ataque más obvios y la configuración de release:
 
 - Extensión falseada (binario llamado `.pdf`).
 - ZIP no-DOCX rechazado.

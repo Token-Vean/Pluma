@@ -1,0 +1,63 @@
+# =============================================================================
+# Dependabot — actualizaciones automáticas de dependencias
+# -----------------------------------------------------------------------------
+# Para PlumA, Dependabot vigila dos ecosistemas:
+#
+#   1. pip — el lockfile real está en backend/requirements.txt; pyproject.toml
+#      define rangos. Dependabot abrirá PR contra requirements.txt con la
+#      versión exacta que cumple con los rangos.
+#
+#   2. github-actions — para que las acciones del workflow security-checks
+#      (actions/checkout, setup-python, aquasecurity/trivy-action) se mantengan
+#      actualizadas sin intervención manual.
+#
+# Las actualizaciones agrupadas reducen el ruido de PR cuando varias
+# dependencias suben a la vez. Las CVE de seguridad se notifican siempre
+# como PR individual con etiqueta "security", al margen del agrupamiento.
+# =============================================================================
+
+version: 2
+updates:
+  # --- Python: backend FastAPI ------------------------------------------------
+  - package-ecosystem: "pip"
+    directory: "/backend"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "07:00"
+      timezone: "Europe/Madrid"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "python"
+    commit-message:
+      prefix: "deps"
+      include: "scope"
+    groups:
+      python-minor-patch:
+        applies-to: version-updates
+        update-types:
+          - "minor"
+          - "patch"
+
+  # --- GitHub Actions ---------------------------------------------------------
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "07:00"
+      timezone: "Europe/Madrid"
+    open-pull-requests-limit: 3
+    labels:
+      - "dependencies"
+      - "ci"
+    commit-message:
+      prefix: "ci"
+      include: "scope"
+    groups:
+      actions-minor-patch:
+        applies-to: version-updates
+        update-types:
+          - "minor"
+          - "patch"
