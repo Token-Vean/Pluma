@@ -128,3 +128,6 @@ offline/images/*.tar.gz
 offline/models/*.gguf
 offline/models/*.bin
 offline/models/Modelfile.offline.generated
+
+# Listados locales generados para auditoría
+listado_*.txt
