@@ -1,52 +1,50 @@
 @echo off
+REM =============================================================================
+REM pluma-install-core.bat
+REM -----------------------------------------------------------------------------
+REM Variante del instalador para distribución offline con imagen pluma-app
+REM precargada. Se basa en el modo (host/container) elegido por el PS1 de
+REM detección. A partir de v0.6 ya no hay flujo de importación de modelo
+REM derivado: el system prompt vive en schemas/pluma-runtime.yaml.
+REM =============================================================================
 setlocal EnableExtensions EnableDelayedExpansion
 call "%~dp0pluma-env.bat" >nul 2>nul
 set "SCRIPT_DIR=%~dp0"
 for %%I in ("%SCRIPT_DIR%\..\..") do set "PLUMA_DIR=%%~fI"
 set "ROOT_DIR=%PLUMA_DIR%"
 cd /d "%PLUMA_DIR%"
-echo Aplicando configuracion local bloqueada...
-powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%enforce-local-config.ps1"
+
+echo Aplicando configuracion local bloqueada y detectando Ollama...
+set "PLUMA_PROFILE="
+for /f "usebackq tokens=1,* delims==" %%A in (`powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%enforce-local-config.ps1"`) do (
+    if /I "%%A"=="PLUMA_INSTALADOR_PROFILE" set "PLUMA_PROFILE=%%B"
+)
 if errorlevel 1 exit /b 1
+
 call "%SCRIPT_DIR%pluma-load-offline-assets.bat"
 if errorlevel 1 exit /b 1
 
+REM Leer el modo elegido por el PS1 desde el .env (host o container)
 set "PLUMA_OLLAMA_MODE=container"
 if exist "%PLUMA_DIR%\.env" (
   for /f "usebackq tokens=1,* delims==" %%A in (`findstr /B /I "PLUMA_OLLAMA_MODE=" "%PLUMA_DIR%\.env"`) do set "PLUMA_OLLAMA_MODE=%%B"
 )
 
-set COMPOSE_PROFILES=
+if defined PLUMA_PROFILE (
+    set "COMPOSE_PROFILES=%PLUMA_PROFILE%"
+) else (
+    set "COMPOSE_PROFILES="
+)
+
 set "OFFLINE_APP_IMAGE=0"
 for %%F in ("%ROOT_DIR%\offline\images\pluma-app*.tar") do if exist "%%~fF" set "OFFLINE_APP_IMAGE=1"
 
-set "OFFLINE_GGUF=0"
-for %%F in ("%ROOT_DIR%\offline\models\*.gguf") do if exist "%%~fF" set "OFFLINE_GGUF=1"
-
-if /I "%PLUMA_OLLAMA_MODE%"=="container" if "%OFFLINE_GGUF%"=="1" (
-  echo Modelo GGUF offline detectado. Iniciando primero Ollama para importarlo antes de arrancar la app...
-  docker compose up -d ollama
-  if errorlevel 1 exit /b 1
-  call "%SCRIPT_DIR%pluma-import-offline-model.bat"
-  if errorlevel 1 exit /b 1
-)
-
-if /I "%PLUMA_OLLAMA_MODE%"=="container" (
-  if "%OFFLINE_APP_IMAGE%"=="1" (
-    echo Iniciando PlumA y Ollama Docker con imagen offline precargada, sin reconstruir la app...
-    docker compose up -d --no-build ollama app
-  ) else (
-    echo No se ha detectado imagen offline de PlumA. Construyendo localmente la app e iniciando Ollama Docker...
-    docker compose up -d --build ollama app
-  )
+if "%OFFLINE_APP_IMAGE%"=="1" (
+    echo Iniciando PlumA con imagen offline precargada en modo %PLUMA_OLLAMA_MODE%...
+    docker compose up -d --no-build
 ) else (
-  if "%OFFLINE_APP_IMAGE%"=="1" (
-    echo Iniciando PlumA con imagen offline precargada y Ollama local del usuario...
-    docker compose up -d --no-build app
-  ) else (
-    echo No se ha detectado imagen offline de PlumA. Construyendo localmente la app y usando Ollama local del usuario...
-    docker compose up -d --build app
-  )
+    echo No se ha detectado imagen offline de PlumA. Construyendo localmente en modo %PLUMA_OLLAMA_MODE%...
+    docker compose up -d --build
 )
 if errorlevel 1 exit /b 1
 
@@ -58,10 +56,10 @@ if errorlevel 1 (
   exit /b 1
 )
 
-if /I not "%PLUMA_OLLAMA_MODE%"=="container" (
+if /I "%PLUMA_OLLAMA_MODE%"=="host" (
   echo Ollama local del usuario detectado. No se descarga el modelo dentro del contenedor.
-) else if "%OFFLINE_GGUF%"=="0" (
-  echo No hay modelo GGUF offline. La app usara el flujo normal de Ollama Docker si falta el modelo base.
+) else (
+  echo Modo container. Si falta el modelo base, la app lo descargara via Ollama Docker.
 )
 
 echo Esperando a que el servicio web de PlumA este listo...

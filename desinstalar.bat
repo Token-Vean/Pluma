@@ -3,28 +3,28 @@ if exist "%~dp0tools\windows\pluma-env.bat" call "%~dp0tools\windows\pluma-env.b
 REM =============================================================================
 REM PlumA - desinstalacion
 REM -----------------------------------------------------------------------------
-REM Elimina los contenedores y, si procede, el volumen con el modelo
-REM descargado dentro de Docker.
+REM Elimina los contenedores y, si la instalacion uso el modo container, el
+REM volumen Docker con el modelo descargado dentro de Ollama Docker.
 REM
-REM Importante: si la instalacion uso el perfil "external", NO se toca
-REM el Ollama ni los modelos del anfitrion.
+REM Importante: si la instalacion uso el modo host (Ollama nativo del equipo),
+REM NO se toca el Ollama ni los modelos del anfitrion.
 REM =============================================================================
 
 setlocal EnableDelayedExpansion
 
 cd /d "%~dp0"
 
-REM Recuperar perfil del .env
-set PERFIL=bundled,external
+REM Recuperar modo del .env
+set "MODO=container"
 if exist .env (
-    for /f "tokens=2 delims==" %%a in ('findstr /b "PERFIL=" .env 2^>nul') do set PERFIL=%%a
+    for /f "tokens=2 delims==" %%a in ('findstr /b "PLUMA_OLLAMA_MODE=" .env 2^>nul') do set "MODO=%%a"
 )
 
 echo.
 echo Esta operacion va a eliminar:
 echo   - Los contenedores Docker de PlumA.
 
-if "!PERFIL!"=="bundled" (
+if /I "!MODO!"=="container" (
     echo   - El volumen Docker con el modelo de IA ^(3-5 GB^).
     echo.
     echo NO se eliminara:
@@ -48,12 +48,17 @@ if not "!CONFIRMACION!"=="si" (
     exit /b 0
 )
 
-set COMPOSE_PROFILES=!PERFIL!
+if /I "!MODO!"=="host" (
+    set "COMPOSE_PROFILES="
+) else (
+    set "COMPOSE_PROFILES=bundled"
+)
 
 echo.
 echo Eliminando contenedores y volumenes...
 docker compose down -v
 
+docker image rm pluma-app:0.6.0-beta >nul 2>&1
 docker image rm pluma-app >nul 2>&1
 
 echo.

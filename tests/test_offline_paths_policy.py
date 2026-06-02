@@ -14,4 +14,3 @@ def test_offline_compose_path_stays_inside_repo():
 def test_offline_placeholder_files_are_kept():
     assert (ROOT / "offline" / "images" / "README.md").exists()
     assert (ROOT / "offline" / "models" / "README.md").exists()
-    assert (ROOT / "offline" / "models" / "Modelfile.template.parameters").exists()

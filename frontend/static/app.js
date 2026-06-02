@@ -95,7 +95,7 @@ function escapeHtml(s) {
 const I18N = {
   es: {
     'brand.title': 'PlumA',
-    'brand.subtitle': 'Descripción asistida · v0.5.0-beta',
+    'brand.subtitle': 'Descripción asistida · v0.6.0-beta',
     'language.label': 'Idioma',
     'language.title': 'Idioma de la interfaz',
     'engine.statusTitle': 'Estado del motor de IA',
@@ -209,7 +209,7 @@ const I18N = {
   },
   en: {
     'brand.title': 'PlumA',
-    'brand.subtitle': 'Assisted description · v0.5.0-beta',
+    'brand.subtitle': 'Assisted description · v0.6.0-beta',
     'language.label': 'Language',
     'language.title': 'Interface language',
     'engine.statusTitle': 'AI engine status',

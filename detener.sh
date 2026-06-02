@@ -2,9 +2,9 @@
 # =============================================================================
 # PlumA — detener servicios
 # -----------------------------------------------------------------------------
-# Detiene la aplicación (y Ollama si se instaló en el perfil "bundled")
-# sin borrar nada. La próxima vez que se ejecute el instalador, todo
-# estará donde lo dejaste.
+# Detiene la aplicación (y Ollama si se instaló en modo container) sin
+# borrar nada. La próxima vez que se ejecute iniciar.sh, todo estará donde
+# lo dejaste.
 # =============================================================================
 
 set -euo pipefail
@@ -21,16 +21,19 @@ else
     exit 1
 fi
 
-# Recuperar el perfil guardado por el instalador
-if [[ -f .env ]] && grep -q "^PERFIL=" .env; then
-    PERFIL=$(grep "^PERFIL=" .env | head -1 | cut -d= -f2)
-else
-    # Por defecto, intentamos ambos perfiles (docker compose ignora los
-    # servicios que no encajan con el perfil)
-    PERFIL="bundled,external"
+# Recuperar el modo guardado por el instalador. Si la instalación dejó el
+# servicio Ollama corriendo (modo container), necesitamos pasar el profile
+# para que `docker compose down` también lo pare.
+MODO="container"
+if [[ -f .env ]]; then
+    val=$(grep '^PLUMA_OLLAMA_MODE=' .env | head -1 | cut -d= -f2- || true)
+    [[ -n "$val" ]] && MODO="$val"
 fi
-
-export COMPOSE_PROFILES="$PERFIL"
+if [[ "$MODO" == "host" ]]; then
+    export COMPOSE_PROFILES=""
+else
+    export COMPOSE_PROFILES="bundled"
+fi
 
 echo "Deteniendo servicios..."
 $COMPOSE down
@@ -38,8 +41,8 @@ $COMPOSE down
 echo ""
 echo "Servicios detenidos."
 echo ""
-echo "Los datos y el modelo se conservan. Para volver a arrancar, ejecuta:"
-echo "  ./instalar.sh"
+echo "Los datos y el modelo se conservan. Para volver a arrancar:"
+echo "  ./iniciar.sh"
 echo ""
 echo "Para eliminar TODO (contenedores, modelo descargado, configuración):"
 echo "  ./desinstalar.sh"

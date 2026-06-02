@@ -8,13 +8,16 @@ if exist "%~dp0tools\windows\pluma-env.bat" call "%~dp0tools\windows\pluma-env.b
 
 cd /d "%~dp0"
 
-REM Recuperar perfil del .env
-set PERFIL=bundled,external
+REM Recuperar modo del .env
+set "MODO=container"
 if exist .env (
-    for /f "tokens=2 delims==" %%a in ('findstr /b "PERFIL=" .env 2^>nul') do set PERFIL=%%a
+    for /f "tokens=2 delims==" %%a in ('findstr /b "PLUMA_OLLAMA_MODE=" .env 2^>nul') do set "MODO=%%a"
 )
-
-set COMPOSE_PROFILES=!PERFIL!
+if /I "!MODO!"=="host" (
+    set "COMPOSE_PROFILES="
+) else (
+    set "COMPOSE_PROFILES=bundled"
+)
 
 echo Deteniendo servicios...
 docker compose down
@@ -22,8 +25,8 @@ docker compose down
 echo.
 echo Servicios detenidos.
 echo.
-echo Los datos y el modelo se conservan. Para volver a arrancar, ejecuta:
-echo   instalar.bat
+echo Los datos y el modelo se conservan. Para volver a arrancar:
+echo   iniciar.bat
 echo.
 echo Para eliminar TODO (contenedores, modelo descargado, configuracion):
 echo   desinstalar.bat

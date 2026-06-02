@@ -107,6 +107,7 @@ def generar_ficha_tecnica(
         "controles_seguridad": {
             "procesamiento_local_previsto": True,
             "perfil": os.getenv("PERFIL", "no especificado"),
+            "ollama_mode": os.getenv("PLUMA_OLLAMA_MODE", "container"),
             "ollama_endpoint": _host_ollama(),
             "allow_remote_ollama": remote_ollama_allowed(),
             "allow_network_exposure": network_exposure_allowed(),

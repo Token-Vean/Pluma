@@ -1,120 +1,120 @@
-﻿$ErrorActionPreference = "Stop"
+# =============================================================================
+# tools/windows/enforce-local-config.ps1
+# -----------------------------------------------------------------------------
+# Aplica configuración local bloqueada al .env de PlumA en Windows y decide
+# el modo de Ollama (host nativo vs. contenedor) según detección.
+#
+# Comportamiento:
+#   1. Si no existe .env pero sí .env.example, lo copia.
+#   2. Elimina del .env cualquier variable que la release pública NO permite
+#      sobrescribir desde fuera, más variables obsoletas desde v0.6
+#      (MODELO_NOMBRE, MODELFILE_PATH), más PLUMA_OLLAMA_MODE/URL que
+#      las fija el propio instalador.
+#   3. Garantiza PUERTO=8082 y MODELO_BASE=gemma4:e2b si no están definidas.
+#   4. Detecta si hay Ollama nativo en el host con el MODELO_BASE descargado.
+#   5. Escribe PLUMA_OLLAMA_MODE y PLUMA_OLLAMA_URL en .env según el caso.
+#   6. Devuelve por stdout una línea "PLUMA_INSTALADOR_PROFILE=bundled" o
+#      "PLUMA_INSTALADOR_PROFILE=" para que el .bat la lea y ajuste
+#      COMPOSE_PROFILES antes del `docker compose up`.
+#
+# Se invoca desde instalar.bat con la CWD ya situada en la raíz del repo.
+# =============================================================================
 
-$root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
-$envFile = Join-Path $root ".env"
-$exampleFile = Join-Path $root ".env.example"
+$ErrorActionPreference = 'Stop'
 
-if (!(Test-Path -LiteralPath $exampleFile)) {
-  throw "No se encuentra .env.example: $exampleFile"
+$repoRoot = (Get-Location).Path
+$envPath = Join-Path $repoRoot '.env'
+$envExamplePath = Join-Path $repoRoot '.env.example'
+
+if (-not (Test-Path -LiteralPath $envPath) -and (Test-Path -LiteralPath $envExamplePath)) {
+    Copy-Item -LiteralPath $envExamplePath -Destination $envPath
 }
 
-if (!(Test-Path -LiteralPath $envFile)) {
-  Copy-Item -LiteralPath $exampleFile -Destination $envFile -Force
+$content = ''
+if (Test-Path -LiteralPath $envPath) {
+    $content = [System.IO.File]::ReadAllText($envPath, [System.Text.Encoding]::UTF8)
 }
 
-$script:content = Get-Content -LiteralPath $envFile -Raw -Encoding UTF8
-if ($null -eq $script:content) { $script:content = "" }
-
-# Quitar claves peligrosas o heredadas. PLUMA_OLLAMA_URL se regenera abajo
-# exclusivamente con valores locales permitidos.
+# Variables que NO se pueden definir desde fuera: la release pública es
+# estrictamente local. MODELO_NOMBRE y MODELFILE_PATH son obsoletas desde v0.6.
+# PLUMA_OLLAMA_MODE y PLUMA_OLLAMA_URL las fija este script.
 $blocked = @(
-  "OLLAMA_URL",
-  "PLUMA_OLLAMA_URL",
-  "PLUMA_OLLAMA_MODE",
-  "ALLOW_REMOTE_OLLAMA",
-  "ALLOW_NETWORK_EXPOSURE",
-  "PLUMA_STRICT_LOCAL",
-  "PERFIL",
-  "COMPOSE_PROFILES"
+    'OLLAMA_URL', 'ALLOW_REMOTE_OLLAMA', 'ALLOW_NETWORK_EXPOSURE',
+    'PLUMA_STRICT_LOCAL', 'PERFIL', 'COMPOSE_PROFILES',
+    'MODELO_NOMBRE', 'MODELFILE_PATH',
+    'PLUMA_OLLAMA_MODE', 'PLUMA_OLLAMA_URL'
 )
 
-foreach ($name in $blocked) {
-  $escaped = [regex]::Escape($name)
-  $pattern = "(?m)^\s*$escaped\s*=.*(?:\r?\n)?"
-  $script:content = [regex]::Replace($script:content, $pattern, "")
-}
-
-function Set-Or-Add([string]$name, [string]$value) {
-  $escaped = [regex]::Escape($name)
-  $pattern = "(?m)^\s*$escaped\s*=.*$"
-  $replacement = "$name=$value"
-  if ($script:content -match $pattern) {
-    $script:content = [regex]::Replace($script:content, $pattern, $replacement)
-  } else {
-    if ($script:content.Length -gt 0 -and -not $script:content.EndsWith("`r`n") -and -not $script:content.EndsWith("`n")) {
-      $script:content += "`r`n"
+$kept = New-Object System.Collections.Generic.List[string]
+foreach ($line in ($content -split "`r?`n")) {
+    if ($line -match '^\s*([^=#\s]+)\s*=' -and ($blocked -contains $Matches[1])) {
+        continue
     }
-    $script:content += "$replacement`r`n"
-  }
+    $kept.Add($line)
 }
 
-function Get-EnvValue([string]$name, [string]$default) {
-  $escaped = [regex]::Escape($name)
-  $m = [regex]::Match($script:content, "(?m)^\s*$escaped\s*=\s*(.+?)\s*$")
-  if ($m.Success) { return $m.Groups[1].Value.Trim() }
-  return $default
+while ($kept.Count -gt 0 -and [string]::IsNullOrWhiteSpace($kept[$kept.Count - 1])) {
+    $kept.RemoveAt($kept.Count - 1)
 }
 
-function Find-OllamaExe {
-  $cmd = Get-Command ollama.exe -ErrorAction SilentlyContinue
-  if ($cmd -and $cmd.Source) { return $cmd.Source }
-  $candidates = @(
-    (Join-Path $env:LOCALAPPDATA "Programs\Ollama\ollama.exe"),
-    (Join-Path $env:ProgramFiles "Ollama\ollama.exe"),
-    (Join-Path ${env:ProgramFiles(x86)} "Ollama\ollama.exe")
-  )
-  foreach ($c in $candidates) {
-    if ($c -and (Test-Path -LiteralPath $c)) { return $c }
-  }
-  return $null
-}
+$text = if ($kept.Count -gt 0) { ($kept -join "`n") + "`n" } else { "" }
 
-function Test-HostOllamaModel([string]$modelName) {
-  $exe = Find-OllamaExe
-  if (-not $exe) {
-    Write-Host "Ollama de Windows/macOS no detectado en PATH ni rutas habituales. Se usara Ollama Docker."
-    return $false
-  }
-  try {
-    $out = & $exe list 2>&1
-    $code = $LASTEXITCODE
-    if ($code -ne 0) {
-      Write-Host "Ollama local instalado, pero no responde a 'ollama list'. Se usara Ollama Docker."
-      Write-Host ($out | Out-String)
-      return $false
+function Ensure-Line {
+    param([string]$Key, [string]$Value)
+    $pattern = '(?m)^' + [regex]::Escape($Key) + '='
+    if ($script:text -notmatch $pattern) {
+        $script:text += "$Key=$Value`n"
     }
-    $escaped = [regex]::Escape($modelName)
-    if (($out | Out-String) -match "(?m)^\s*$escaped(\s|$)") {
-      Write-Host "Modelo base ya detectado en Ollama local del usuario: $modelName"
-      return $true
-    }
-    Write-Host "Ollama local detectado, pero no contiene el modelo base $modelName. Se usara Ollama Docker."
-    return $false
-  } catch {
-    Write-Host "No se pudo comprobar Ollama local: $($_.Exception.Message). Se usara Ollama Docker."
-    return $false
-  }
 }
 
-# Valores funcionales permitidos.
-Set-Or-Add "PUERTO" "8082"
-if ($script:content -notmatch "(?m)^\s*MODELO_BASE\s*=") { Set-Or-Add "MODELO_BASE" "gemma4:e2b" }
-Set-Or-Add "MODELO_NOMBRE" "pluma:0.5.0"
+Ensure-Line 'PUERTO' '8082'
+Ensure-Line 'MODELO_BASE' 'gemma4:e2b'
 
-$modelBase = Get-EnvValue "MODELO_BASE" "gemma4:e2b"
-if (Test-HostOllamaModel $modelBase) {
-  # host.docker.internal sigue siendo local: es el host Windows/macOS visto desde Docker.
-  Set-Or-Add "PLUMA_OLLAMA_MODE" "host"
-  Set-Or-Add "PLUMA_OLLAMA_URL" "http://host.docker.internal:11434"
-  Write-Host "PlumA usara Ollama local ya instalado para evitar descargar de nuevo el modelo."
+# -----------------------------------------------------------------------------
+# Detección de Ollama nativo en el host
+# -----------------------------------------------------------------------------
+# Leer MODELO_BASE del estado actual del texto.
+$modeloBase = 'gemma4:e2b'
+$m = [regex]::Match($text, '(?m)^MODELO_BASE=(.+)$')
+if ($m.Success) { $modeloBase = $m.Groups[1].Value.Trim() }
+
+$usarHostOllama = $false
+try {
+    $resp = Invoke-WebRequest -Uri 'http://localhost:11434/api/tags' `
+                              -TimeoutSec 2 `
+                              -UseBasicParsing `
+                              -ErrorAction Stop
+    if ($resp.StatusCode -eq 200) {
+        $tags = $resp.Content | ConvertFrom-Json
+        $nombres = @($tags.models | ForEach-Object { $_.name })
+        if (($nombres -contains $modeloBase) -or ($nombres -contains ($modeloBase + ':latest'))) {
+            $usarHostOllama = $true
+            Write-Host "Ollama del host responde y tiene $modeloBase. Se evitara descarga duplicada."
+        } else {
+            Write-Host "Ollama del host responde pero NO tiene $modeloBase. Se usara Ollama dentro de Docker."
+        }
+    }
+} catch {
+    Write-Host "Ollama nativo no detectado en el host. Se usara Ollama dentro de Docker."
+}
+
+if ($usarHostOllama) {
+    $text += "`n# Modo elegido por el instalador en funcion de la deteccion del host`n"
+    $text += "PLUMA_OLLAMA_MODE=host`n"
+    $text += "PLUMA_OLLAMA_URL=http://host.docker.internal:11434`n"
+    $perfil = ''
 } else {
-  Set-Or-Add "PLUMA_OLLAMA_MODE" "container"
-  Set-Or-Add "PLUMA_OLLAMA_URL" "http://ollama:11434"
-  Write-Host "PlumA usara el contenedor Ollama interno. Si falta el modelo, lo descargara ahi."
+    $text += "`n# Modo elegido por el instalador en funcion de la deteccion del host`n"
+    $text += "PLUMA_OLLAMA_MODE=container`n"
+    $text += "PLUMA_OLLAMA_URL=http://ollama:11434`n"
+    $perfil = 'bundled'
 }
 
-# Normalizar saltos y escribir con UTF-8 BOM para Windows PowerShell 5.1.
-$utf8Bom = New-Object System.Text.UTF8Encoding($true)
-[System.IO.File]::WriteAllText($envFile, $script:content, $utf8Bom)
-Write-Host "Configuracion publica saneada. Modo local bloqueado aplicado por Docker Compose y backend."
-exit 0
+# Escritura sin BOM, LF puros.
+$utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+[System.IO.File]::WriteAllText($envPath, $text, $utf8NoBom)
+
+Write-Host "Configuracion saneada. No se permite endpoint remoto ni publicacion en red."
+
+# Línea que el .bat parseará para saber qué profile activar.
+Write-Host "PLUMA_INSTALADOR_PROFILE=$perfil"

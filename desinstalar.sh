@@ -2,11 +2,11 @@
 # =============================================================================
 # PlumA — desinstalación
 # -----------------------------------------------------------------------------
-# Elimina los contenedores y, si procede, el volumen con el modelo
-# descargado dentro de Docker.
+# Elimina los contenedores y, si la instalación usó el modo container, el
+# volumen Docker con el modelo descargado dentro de Ollama Docker.
 #
-# Importante: si la instalación usó el perfil "external" (Ollama del
-# equipo), NO se toca el Ollama ni los modelos del anfitrión.
+# Importante: si la instalación usó el modo host (Ollama nativo del equipo),
+# NO se toca el Ollama ni los modelos del anfitrión.
 # =============================================================================
 
 set -euo pipefail
@@ -23,18 +23,18 @@ else
     exit 1
 fi
 
-# Recuperar perfil
-if [[ -f .env ]] && grep -q "^PERFIL=" .env; then
-    PERFIL=$(grep "^PERFIL=" .env | head -1 | cut -d= -f2)
-else
-    PERFIL="bundled,external"
+# Recuperar modo
+MODO="container"
+if [[ -f .env ]]; then
+    val=$(grep '^PLUMA_OLLAMA_MODE=' .env | head -1 | cut -d= -f2- || true)
+    [[ -n "$val" ]] && MODO="$val"
 fi
 
 echo ""
 echo "Esta operación va a eliminar:"
 echo "  - Los contenedores Docker del PlumA."
 
-if [[ "$PERFIL" == "bundled" ]]; then
+if [[ "$MODO" == "container" ]]; then
     echo "  - El volumen Docker con el modelo de IA (3-5 GB)."
     echo ""
     echo "NO se eliminará:"
@@ -56,13 +56,18 @@ if [[ "$confirmacion" != "si" ]]; then
     exit 0
 fi
 
-export COMPOSE_PROFILES="$PERFIL"
+if [[ "$MODO" == "host" ]]; then
+    export COMPOSE_PROFILES=""
+else
+    export COMPOSE_PROFILES="bundled"
+fi
 
 echo ""
 echo "Eliminando contenedores y volúmenes..."
 $COMPOSE down -v
 
 # Imagen de la app (se regenera la próxima instalación)
+docker image rm pluma-app:0.6.0-beta 2>/dev/null || true
 docker image rm pluma-app 2>/dev/null || true
 
 echo ""

@@ -302,3 +302,89 @@ documento de pruebas:
    aunque se borre, ha podido ser visto y archivado por terceros.
 
 Lo más fácil es prevenir: ejecutar el verificador antes de cada `push`.
+
+
+## Endurecimiento de Ollama nativo (modo host)
+
+A partir de v0.6, si tienes Ollama instalado nativo en tu equipo con el
+modelo base ya descargado, el instalador detecta esa situación y
+configura PlumA para usar tu Ollama del host (`PLUMA_OLLAMA_MODE=host`)
+en lugar de levantar un segundo Ollama dentro de Docker. Esto evita
+duplicar 4-5 GB de modelo.
+
+**Punto de atención de seguridad.** El servicio de Ollama, por defecto,
+escucha en `0.0.0.0:11434`, es decir, acepta conexiones desde cualquier
+interfaz de red del equipo. En una red corporativa o wifi compartida,
+otros dispositivos de la misma red pueden enviar prompts a tu Ollama,
+gastarle compute y, potencialmente, ver respuestas que generes mientras
+procesas documentos sensibles.
+
+PlumA no introduce esta exposición — es la configuración por defecto de
+Ollama, independientemente de PlumA — pero al fomentar el modo host
+conviene cerrarla explícitamente. Las tres opciones siguientes la
+limitan a `localhost` (`127.0.0.1`).
+
+### Windows
+
+Abre **Configuración → Sistema → Información → Configuración avanzada
+del sistema → Variables de entorno**, y añade una variable de **usuario**
+(no del sistema, para no afectar a otros usuarios):
+
+- **Nombre:** `OLLAMA_HOST`
+- **Valor:** `127.0.0.1`
+
+Cierra Ollama (icono en la bandeja del sistema → Quit) y vuelve a
+arrancarlo. Verifica con:
+
+```
+netstat -ano | findstr :11434
+```
+
+Debes ver `127.0.0.1:11434` y no `0.0.0.0:11434`.
+
+### macOS
+
+Cierra Ollama desde la barra de menú (icono → Quit) y arranca desde
+terminal con la variable de entorno:
+
+```
+OLLAMA_HOST=127.0.0.1 ollama serve
+```
+
+Para hacerlo permanente, edita tu `~/.zshrc` o `~/.bash_profile` y
+añade `export OLLAMA_HOST=127.0.0.1`.
+
+### Linux (systemd)
+
+Edita el servicio de Ollama con `sudo systemctl edit ollama` y añade:
+
+```
+[Service]
+Environment="OLLAMA_HOST=127.0.0.1"
+```
+
+Recarga y reinicia:
+
+```
+sudo systemctl daemon-reload
+sudo systemctl restart ollama
+```
+
+Verifica con `ss -tlnp | grep 11434`. Debe aparecer `127.0.0.1:11434`.
+
+### Comprobación final
+
+Tras endurecer Ollama, vuelve a ejecutar `instalar.sh`/`instalar.bat`.
+El instalador comprobará que Ollama del host responde en `127.0.0.1`
+(porque su detección usa `localhost`) y volverá a configurarte el modo
+host. Si por alguna razón ya no detecta Ollama, recurrirá automáticamente
+al modo container (Ollama dentro de Docker), que es igualmente seguro.
+
+### Por qué no lo hace PlumA automáticamente
+
+Cambiar la configuración del servicio Ollama del host requiere
+privilegios del usuario y depende del SO. PlumA no puede modificar
+servicios del sistema del archivero ni debe hacerlo: la herramienta
+asume que el usuario gestiona su propio Ollama. Lo que sí hace es
+advertir cuando detecta que va a usar el Ollama nativo, para que el
+usuario decida si quiere endurecerlo.

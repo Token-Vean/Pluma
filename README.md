@@ -63,16 +63,25 @@ El instalador detecta automáticamente si ya tienes Ollama funcionando
 en tu equipo:
 
 - Si **no** tienes Ollama, lo levanta dentro de Docker y descarga el
-  modelo por defecto (unos 4-5 GB la primera vez).
-- Si **ya** tienes Ollama con modelos descargados, la aplicación se
-  conecta directamente a él sin duplicar nada.
+  modelo base (unos 4-5 GB la primera vez).
+- Si **ya** tienes Ollama con el modelo base descargado, la aplicación
+  se conecta directamente a él (vía `host.docker.internal:11434`) y
+  evita duplicar el modelo dentro de Docker.
+- PlumA no crea modelos derivados en Ollama. Tras la instalación,
+  `ollama list` muestra únicamente el modelo base.
 
 Al terminar, abre el navegador en <http://localhost:8082> salvo que hayas cambiado `PUERTO` en `.env`.
 
 Guía detallada y solución de problemas en [INSTALACION.md](INSTALACION.md).
 
-Para detener: `detener.sh` / `detener.bat`.
-Para eliminar todo: `desinstalar.sh` / `desinstalar.bat`.
+Para el uso cotidiano (cuando ya está instalado):
+
+- Arrancar: `iniciar.sh` / `iniciar.bat` — ligero, no reconstruye nada.
+- Detener: `detener.sh` / `detener.bat`.
+- Eliminar todo: `desinstalar.sh` / `desinstalar.bat`.
+
+`instalar.sh` / `instalar.bat` solo es necesario la primera vez, tras
+actualizar el repo o si quieres regenerar la configuración.
 
 ## Uso rápido
 
@@ -94,30 +103,40 @@ pluma/
 │   │   ├── router.py         validación y preparación de entrada
 │   │   ├── identificador_tipo.py
 │   │   ├── api.py            endpoints REST
-│   │   ├── bootstrap.py      preparación automática del modelo
-│   │   ├── llm.py            cliente Ollama
+│   │   ├── bootstrap.py      verificación del modelo base en Ollama
+│   │   ├── llm.py            cliente Ollama; inyecta system y opciones en cada llamada
 │   │   └── main.py
 │   ├── Dockerfile
 │   └── pyproject.toml
-├── schemas/              normas y catálogos en YAML editable
+├── schemas/              normas, catálogos y configuración en YAML editable
+│   ├── pluma-runtime.yaml    system prompt y parámetros de inferencia
 │   ├── isad-g.yaml
+│   ├── dacs.yaml
 │   ├── isaar-cpf.yaml
 │   ├── isdf.yaml
 │   ├── isdiah.yaml
+│   ├── ric.yaml
 │   └── tipos-documentales.yaml
 ├── frontend/             interfaz web estática (HTML, CSS y JavaScript)
 ├── ejemplos/             documentos de prueba
-├── Modelfile             receta del modelo especializado Ollama
 └── docker-compose.yml
 ```
 
 ## Esquemas editables
 
-Los cuatro esquemas de norma y el catálogo de tipos documentales son
-ficheros YAML en la carpeta `schemas/`. Un archivero puede ampliar o
-afinar estos ficheros para su contexto (añadir tipos documentales
-específicos, matizar instrucciones) sin tocar código ni reconstruir la
-imagen Docker. Basta con reiniciar el contenedor de la aplicación.
+Los esquemas de norma, el catálogo de tipos documentales y la
+configuración de runtime del asistente son ficheros YAML en la carpeta
+`schemas/`. Un archivero puede ampliar o afinar estos ficheros para su
+contexto (añadir tipos documentales específicos, matizar instrucciones
+del system prompt, cambiar parámetros de inferencia) sin tocar código
+ni reconstruir la imagen Docker. Basta con reiniciar el contenedor de
+la aplicación.
+
+En particular, `schemas/pluma-runtime.yaml` contiene el system prompt
+completo del asistente y los parámetros de inferencia (temperature,
+num_ctx, etc.). PlumA no crea un modelo derivado en Ollama: inyecta el
+contenido de este fichero en cada petición, lo que permite cambiar de
+modelo base (`MODELO_BASE` en `.env`) sin regenerar nada.
 
 ## Licencia y autoría
 
@@ -128,12 +147,6 @@ La interfaz incluye una referencia visible al desarrollo por Víctor Villapalos 
 Esta es la versión libre del proyecto. Hay una versión comercial
 pensada para instituciones con necesidades de procesamiento por lotes,
 auditoría formal, integraciones avanzadas y soporte.
-
-## Estado del proyecto
-
-Versión 0.5.0-beta — alpha pública. No apto todavía para
-entornos de producción. Las pruebas institucionales son bienvenidas
-por contacto directo.
 
 ## Autor
 
@@ -169,8 +182,8 @@ Esta versión amplía los límites para descripciones archivísticas extensas. L
 Variables principales en `.env`:
 
 - `MAX_LONGITUD_TEXTO_EXTRAIDO`: texto máximo extraído del documento que puede entrar en el prompt. Valor por defecto: `800000` caracteres.
-- `OLLAMA_NUM_CTX`: ventana de contexto solicitada a Ollama. Valor por defecto: `32768` tokens.
-- `OLLAMA_NUM_PREDICT`: longitud máxima de respuesta del modelo. Valor por defecto: `8192` tokens.
+- `OLLAMA_NUM_CTX`: ventana de contexto solicitada a Ollama. Valor por defecto: `8192` tokens. Puede aumentarse en máquinas con suficiente VRAM/RAM para documentos largos.
+- `OLLAMA_NUM_PREDICT`: longitud máxima de respuesta del modelo. Valor por defecto: `4096` tokens.
 - `MAX_LONGITUD_VALOR_LLM`: longitud máxima admitida para cada valor propuesto por el modelo. Valor por defecto: `50000` caracteres.
 
 Aumentar estos valores puede mejorar la precisión en documentos largos, pero también incrementa consumo de memoria, tiempo de respuesta y carga del modelo. Para resultados extensos en “Título” y “Alcance y contenido”, conviene usar modelos con ventana de contexto amplia y suficiente RAM.
@@ -188,7 +201,7 @@ Para obtener una descripción en inglés, seleccione **EN** antes de procesar o 
 
 También se ha añadido un botón **Apagar** en la cabecera. Por seguridad, no monta el socket Docker ni ejecuta comandos del anfitrión: el botón detiene el proceso del servidor local de la aplicación. En el perfil `bundled`, el contenedor de Ollama puede quedar activo hasta ejecutar `detener.bat`, `detener.sh` o `docker compose down`.
 
-El modelo base por defecto es `gemma4:e2b`. Puede cambiarse en `.env` mediante `MODELO_BASE`, pero debe existir en Ollama o poder descargarse en el perfil correspondiente.
+El modelo base por defecto es `gemma4:e2b`. Puede cambiarse en `.env` mediante `MODELO_BASE`, pero debe existir en Ollama o poder descargarse en el perfil correspondiente. El comportamiento del asistente (system prompt y parámetros de inferencia) es independiente del modelo base y vive en `schemas/pluma-runtime.yaml`; cambiar de modelo no requiere regenerar nada en Ollama.
 
 
 ## Documentación
@@ -204,7 +217,7 @@ El modelo base por defecto es `gemma4:e2b`. Puede cambiarse en `.env` mediante `
 
 ## Estado del proyecto
 
-**Versión 0.5.0-beta — alpha pública.** Esta versión está pensada
+**Versión 0.6.0-beta — beta pública.** Esta versión está pensada
 para evaluación por archiveros, formación, demostraciones y entornos
 de prueba controlados. **No es apta para producción** sin auditoría
 previa y sin las acciones que se describen en `SECURITY_HARDENING.md`
@@ -235,5 +248,7 @@ hacerse también disponible bajo la misma licencia.
 ## Ficha técnica del proceso
 
 Desde la versión 0.5.0-beta, cada análisis incorpora una ficha técnica ligera de auditoría. La ficha no incluye el texto del documento ni los valores descriptivos propuestos: recoge metadatos de proceso, versión de PlumA, norma usada, ruta de procesamiento, estado del sandbox de parsers, hash SHA-256 del fichero y recuento de evidencias localizadas, no localizadas o no verificables textualmente.
+
+A partir de la versión 0.6.0-beta, el campo `modelo` de la ficha técnica registra el nombre del modelo base real ejecutado (por ejemplo `gemma4:e2b`) en lugar del alias derivado utilizado en versiones anteriores. Esto mejora la trazabilidad: el registro refleja literalmente qué pesos del modelo se invocaron.
 
 Esta ficha mejora la trazabilidad técnica del proceso, pero no sustituye la revisión profesional del archivero ni una auditoría formal de seguridad.

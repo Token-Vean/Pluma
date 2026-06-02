@@ -64,9 +64,10 @@ han sido cerrados en esta release:
   desde el inicio sin necesidad de adopción implícita posterior.
   Funcionalmente equivalente hoy, más robusto si en el futuro se
   renderizan campos directamente en la ventana flotante.
-- **Coherencia de versión en `api.py` y `Modelfile`**: añadidos al
-  `security_static_check.py` para que cualquier desfase de versión
-  futuro falle en CI antes de publicar.
+- **Coherencia de versión en ficheros activos**: `security_static_check.py`
+  verifica que la versión `APP_VERSION` aparece en `backend/app/version.py`,
+  `docker-compose.yml`, `frontend/static/app.js` e `index.html`. Cualquier
+  desfase futuro falla en CI antes de publicar.
 
 
 ## Pendientes — esperados para 0.6.0 o release candidate
@@ -213,3 +214,58 @@ pueden no coincidir entre normas.
 Los issues van al repositorio público de GitHub. Si el problema tiene
 implicaciones de seguridad, ver `SECURITY.md` para el procedimiento
 de divulgación responsable.
+
+
+## Riesgos residuales reconocidos en 0.6.0-beta
+
+### Sandbox de parsers en Windows: sin `RLIMIT_AS`
+
+El módulo `parser_sandbox.py` aplica límites POSIX (`RLIMIT_AS` para
+memoria, `RLIMIT_CPU` para tiempo de CPU) cuando el módulo `resource`
+de Python está disponible. En **Windows**, `resource` no existe, así
+que esos límites no se aplican al proceso hijo. El aislamiento se
+mantiene por tres vías:
+
+- Proceso hijo separado con `multiprocessing` (modo `spawn`).
+- Timeout duro (`SANDBOX_TIMEOUT_SEGUNDOS=90` por defecto) que mata
+  el proceso si tarda demasiado.
+- `mem_limit: 2g` aplicado al contenedor de la aplicación en
+  `docker-compose.yml`, que acota el daño máximo dentro del
+  contenedor independientemente del SO host.
+
+En la práctica, en el despliegue Docker recomendado el contenedor
+corre Linux dentro de la VM de Docker Desktop, por lo que `resource`
+sí está disponible. La advertencia aplica si alguien ejecuta el
+backend directamente sobre Windows fuera de Docker.
+
+### Concurrencia limitada solo en `/api/describir`
+
+El semáforo `_SEM_PROCESAMIENTO` (variable `MAX_PROCESAMIENTOS_SIMULTANEOS`,
+por defecto 1) limita la concurrencia del endpoint pesado
+`/api/describir`. El endpoint `/api/exportar/{formato}` no usa ese
+semáforo; teóricamente, un usuario podría disparar varias
+exportaciones a la vez. La superficie de daño está acotada por
+`MAX_EXPORT_BODY_BYTES=15 MB` y por el `mem_limit` del contenedor,
+pero no por un límite de concurrencia explícito. En uso monousuario
+local no representa un problema real; documentado por transparencia.
+
+### `host.docker.internal` y endurecimiento de Ollama nativo
+
+A partir de v0.6, cuando el instalador detecta Ollama nativo en el
+host (modo `PLUMA_OLLAMA_MODE=host`), la app del contenedor se
+conecta a `host.docker.internal:11434`. PlumA no introduce
+exposición de red — Ollama escucha en `0.0.0.0:11434` por defecto
+independientemente de PlumA — pero el modo host hace más probable
+que un archivero esté usando un Ollama nativo expuesto sin saberlo.
+La sección "Endurecimiento de Ollama nativo" de `INSTALACION.md`
+documenta cómo limitarlo a `localhost` con `OLLAMA_HOST=127.0.0.1`.
+
+### Imagen oficial `ollama/ollama` no escaneada
+
+El workflow `.github/workflows/security-checks.yml` ejecuta Trivy
+sobre `pluma-app:0.6.0-beta` (la imagen que construimos). La imagen
+`ollama/ollama:0.21.2` que se usa en el perfil bundled no se
+escanea: es upstream y no la construimos nosotros. Los CVEs de
+Ollama deben monitorizarse en sus releases. Mantener la versión
+fijada en `docker-compose.yml` permite cambiarla deliberadamente
+cuando upstream publique parches relevantes.

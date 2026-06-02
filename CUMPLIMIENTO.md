@@ -360,3 +360,86 @@ detector determinista de secretos ni sustituyen la revisión profesional.
 ## Apagado desde la interfaz
 
 La interfaz incorpora un botón de apagado local. Este botón detiene el proceso del servidor de la aplicación mediante un endpoint protegido por CSRF y comprobación de origen local. Por seguridad, la aplicación no tiene acceso al socket Docker del anfitrión y no ejecuta `docker compose down`; en el perfil bundled, el contenedor de Ollama puede seguir activo hasta usar los scripts de detención o Docker Compose.
+
+
+## Cambio arquitectónico v0.5.0 → v0.6.0: separación de configuración y modelo
+
+### Motivación
+
+En v0.5.0 el comportamiento del asistente (system prompt y parámetros
+de inferencia) se "horneaba" en un modelo derivado de Ollama mediante
+`ollama create pluma:0.5.0 -f Modelfile` durante el bootstrap. Esto
+introducía dos problemas relevantes para auditoría y trazabilidad:
+
+1. **Indirección en la auditoría.** La ficha técnica registraba el
+   nombre del alias derivado (`pluma:0.5.0`) en lugar del modelo base
+   real (`gemma4:e2b`). Para reproducir una ejecución pasada había que
+   inspeccionar el Modelfile del commit correspondiente *y* el manifest
+   interno de Ollama, lo que diluía la trazabilidad documental.
+2. **Configuración dispersa.** El `Modelfile` (raíz del repo) y
+   `MODELO_BASE` (en `.env`) eran dos fuentes para una misma decisión.
+   `MODELO_BASE` figuraba como configurable pero el `Modelfile` lo
+   pisaba con `FROM gemma4:e2b`.
+
+### Cambio aplicado
+
+A partir de v0.6.0, el system prompt y los parámetros de inferencia
+viven en un único fichero versionado: `schemas/pluma-runtime.yaml`.
+El backend lo lee al arrancar y lo inyecta en cada petición a
+`/api/generate` de Ollama. No se crea ningún modelo derivado en Ollama.
+
+### Implicaciones de cumplimiento
+
+**No hay cambios en el procesamiento de datos personales.** El
+flujo documental sigue siendo idéntico:
+
+- Los documentos se procesan en local.
+- No se envían a la nube.
+- Los logs de la aplicación siguen recogiendo metadatos sin contenido
+  documental (ver "Logs y auditabilidad" más arriba en este documento).
+- El sandbox de parsers, los límites pre-parseo, la validación
+  anti zip-bomb e image-bomb, el CSRF y la restricción de Ollama remoto
+  permanecen activos sin modificación.
+
+**Mejoras de trazabilidad:**
+
+- La ficha técnica de auditoría registra ahora el modelo base real
+  ejecutado (`gemma4:e2b`, `gemma3:12b`, etc.) en lugar del alias
+  derivado. Para reproducir una ejecución basta con el SHA del commit
+  del repo, el nombre del modelo base y el SHA-256 del documento.
+- El system prompt es un fichero de texto plano legible directamente
+  por el archivero, sin necesidad de inspeccionar configuración interna
+  del motor de IA. Un responsable de un archivo puede revisar
+  exactamente qué instrucciones se le dan al modelo abriendo
+  `schemas/pluma-runtime.yaml`.
+- El versionado del comportamiento del asistente sigue las reglas
+  habituales de control de versiones (Git): cualquier cambio en el
+  system prompt deja huella en el historial del repo, con autor, fecha
+  y diff exacto.
+
+**Sin cambios respecto al cumplimiento previo:**
+
+- No hay tratamiento adicional ni nuevo de datos personales.
+- No se introducen nuevos endpoints, ni nuevos formatos de exportación,
+  ni nuevas categorías de información procesada.
+- Las bases legales aplicables al tratamiento (en tanto la herramienta
+  se utilice en una institución con responsabilidad sobre los fondos
+  procesados) no se ven afectadas.
+- La política de retención de logs y la ausencia de telemetría se
+  mantienen.
+
+### Recomendación para instituciones que evalúen PlumA
+
+Para auditorías formales de coherencia de descripciones generadas, se
+recomienda registrar junto con cada propuesta los siguientes
+identificadores (todos disponibles en la ficha técnica de auditoría
+generada por la aplicación):
+
+- SHA del commit del repo de PlumA utilizado.
+- Nombre y versión del modelo base de Ollama.
+- SHA-256 del fichero documental procesado.
+- Norma aplicada y modo de extracción.
+
+Con estos cuatro identificadores, una ejecución pasada es plenamente
+reproducible y verificable, sin depender de artefactos opacos
+almacenados dentro del motor de IA.

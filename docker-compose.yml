@@ -3,11 +3,27 @@
 # -----------------------------------------------------------------------------
 # Release pública local-first.
 #
-# Corrección 0.5.0-beta:
+# Cambios 0.6.0-beta respecto a 0.5.0-beta:
+#   - Se elimina el bind mount del Modelfile y las variables MODELO_NOMBRE y
+#     MODELFILE_PATH. El comportamiento del asistente (system prompt y
+#     parámetros de inferencia) vive ahora en schemas/pluma-runtime.yaml y se
+#     inyecta en cada llamada a Ollama desde el backend; ya no se crea un
+#     modelo derivado con `ollama create`.
+#   - Imagen actualizada a pluma-app:0.6.0-beta.
+#   - El servicio Ollama interno está bajo el profile `bundled`. El instalador
+#     detecta si el usuario tiene Ollama nativo en el host con el modelo
+#     descargado y, si es así, activa el modo "host" (no se arranca el Ollama
+#     del contenedor; la app se conecta a host.docker.internal:11434). En caso
+#     contrario, activa el profile bundled y se arranca el Ollama Docker.
+#   - El servicio `app` declara `extra_hosts: host.docker.internal:host-gateway`
+#     para que `host.docker.internal` resuelva también desde contenedores en
+#     Linux (en Windows/macOS ya resuelve de fábrica).
+#
+# Configuración heredada de 0.5.0-beta:
 #   - El puerto de la aplicación se publica con sintaxis larga y fija:
 #       127.0.0.1:8082 -> 8081/tcp
 #   - No se usa variable editable para publicar el puerto de la interfaz.
-#   - La red de la app ya no se marca como internal:true, porque en Docker
+#   - La red de la app NO se marca como internal:true, porque en Docker
 #     Desktop/Compose podía impedir que Windows accediera al puerto publicado.
 #   - El bloqueo local se mantiene por capas: host_ip 127.0.0.1, middleware de
 #     Host/Origin/CSRF, OLLAMA_URL forzado y rechazo de configuración remota.
@@ -23,6 +39,8 @@ services:
   ollama:
     image: ${OLLAMA_IMAGE:-ollama/ollama:0.21.2}
     container_name: pluma-ollama
+    profiles:
+      - bundled
     volumes:
       - ollama-models:/root/.ollama
       - ./offline/models:/offline/models:ro
@@ -39,14 +57,14 @@ services:
     cpus: 4
 
   app:
-    image: pluma-app:0.5.0-beta
+    image: pluma-app:0.6.0-beta
     build: ./backend
     container_name: pluma-app
     environment:
       # Valores bloqueados de la release pública. PLUMA_OLLAMA_URL solo puede
       # apuntar a Ollama local validado por el backend: contenedor interno o
       # host.docker.internal si el instalador detecta el modelo ya instalado
-      # en Ollama de Windows/macOS.
+      # en Ollama de Windows/macOS/Linux.
       OLLAMA_URL: ${PLUMA_OLLAMA_URL:-http://ollama:11434}
       PLUMA_OLLAMA_MODE: ${PLUMA_OLLAMA_MODE:-container}
       PLUMA_STRICT_LOCAL: "true"
@@ -56,12 +74,13 @@ services:
       PUERTO: "8081"
 
       # Parámetros funcionales permitidos.
+      # MODELO_BASE controla qué modelo de Ollama se usa. El comportamiento
+      # del asistente (system prompt y parámetros de inferencia) vive en
+      # schemas/pluma-runtime.yaml, no aquí.
       MODELO_BASE: ${MODELO_BASE:-gemma4:e2b}
-      MODELO_NOMBRE: ${MODELO_NOMBRE:-pluma:0.5.0}
       MODELO_VISUAL_LECTURA: ${MODELO_VISUAL_LECTURA:-gemma4:e2b}
       PLUMA_LECTURA_VISUAL_PREVIA: ${PLUMA_LECTURA_VISUAL_PREVIA:-true}
       MAX_TRANSCRIPCION_VISUAL: ${MAX_TRANSCRIPCION_VISUAL:-12000}
-      MODELFILE_PATH: /app/Modelfile
       USAR_SANDBOX_PARSERS: ${USAR_SANDBOX_PARSERS:-true}
       PLUMA_PDF_HIBRIDO_CON_IMAGENES: ${PLUMA_PDF_HIBRIDO_CON_IMAGENES:-false}
       SANDBOX_TIMEOUT_SEGUNDOS: ${SANDBOX_TIMEOUT_SEGUNDOS:-90}
@@ -84,8 +103,11 @@ services:
         host_ip: "127.0.0.1"
     volumes:
       - ./schemas:/app/schemas:ro
-      - ./Modelfile:/app/Modelfile:ro
       - ./frontend/static:/app/static:ro
+    # Para que host.docker.internal resuelva al anfitrión en Linux. En
+    # Windows/macOS ya está disponible de fábrica; esta directiva es inocua.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     restart: "no"
     networks:
       - pluma-internal
