@@ -103,11 +103,9 @@ echo OK - Servicios arrancados
 echo.
 
 echo [5/6] Esperando a que la aplicacion responda...
+REM Puerto fijo por diseno en la release local bloqueada. Debe coincidir con
+REM `published` en docker-compose.yml; no se lee de .env.
 set "PUERTO=8082"
-if exist .env (
-    for /f "tokens=2 delims==" %%a in ('findstr /b "PUERTO=" .env 2^>nul') do set "PUERTO=%%a"
-)
-if not defined PUERTO set "PUERTO=8082"
 set MAX_INTENTOS=30
 set INTENTO=0
 :wait_loop

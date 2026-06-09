@@ -33,10 +33,12 @@
 # - `cap_drop: ALL` también en el contenedor de Ollama, alineándolo con el de
 #   la app. VALIDAR en perfil bundled (CPU y, si aplica, GPU) antes de
 #   release; si Ollama requiere capacidades concretas, documentarlas aquí.
-# - El puerto publicado se interpola desde PUERTO (.env), que era el contrato
-#   documentado en README e INSTALACION pero no estaba cableado: PUERTO era
-#   configuración muerta y el instalador esperaba en un puerto distinto al
-#   publicado. La IP de publicación sigue fija en 127.0.0.1 y NO es editable.
+# - El puerto publicado se mantiene FIJO en 127.0.0.1:8082, ahora de forma
+#   explícita y coherente en todos los ficheros: PUERTO desaparece de .env,
+#   README e instaladores como variable de usuario (era configuración muerta
+#   que desincronizaba instalador y compose). Menos superficie de
+#   configuración y un invariante literal verificable por
+#   security_static_check.py sin relajar el check.
 # - El healthcheck lee el puerto interno de la variable PUERTO del contenedor
 #   en lugar de hardcodear 8081.
 #
@@ -122,10 +124,10 @@ services:
       MAX_LONGITUD_VALOR_EXPORTACION: ${MAX_LONGITUD_VALOR_EXPORTACION:-50000}
       MAX_LONGITUD_EVIDENCIA_EXPORTACION: ${MAX_LONGITUD_EVIDENCIA_EXPORTACION:-8000}
     ports:
-      # Solo el número de puerto es editable (PUERTO en .env). La IP de
-      # publicación queda fija en loopback IPv4.
+      # Publicación fija por diseño: 127.0.0.1:8082. Cambiarla exige editar
+      # este fichero y los scripts instalar/detener de forma consciente.
       - target: 8081
-        published: "${PUERTO:-8082}"
+        published: "8082"
         protocol: tcp
         host_ip: "127.0.0.1"
     volumes:

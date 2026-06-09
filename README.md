@@ -66,8 +66,8 @@ en tu equipo:
 - Si **ya** tienes Ollama con modelos descargados, la aplicación se
   conecta directamente a él sin duplicar nada.
 
-Al terminar, abre el navegador en <http://127.0.0.1:8082> salvo que
-hayas cambiado `PUERTO` en `.env`.
+Al terminar, abre el navegador en <http://127.0.0.1:8082>. El puerto es
+fijo por diseño en esta release (solo loopback IPv4).
 
 Guía detallada y solución de problemas en [INSTALACION.md](INSTALACION.md).
 
