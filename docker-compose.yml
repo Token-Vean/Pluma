@@ -4,29 +4,50 @@
 # Release pública local-first.
 #
 # Cambios 0.6.0-beta respecto a 0.5.0-beta:
-#   - Se elimina el bind mount del Modelfile y las variables MODELO_NOMBRE y
-#     MODELFILE_PATH. El comportamiento del asistente (system prompt y
-#     parámetros de inferencia) vive ahora en schemas/pluma-runtime.yaml y se
-#     inyecta en cada llamada a Ollama desde el backend; ya no se crea un
-#     modelo derivado con `ollama create`.
-#   - Imagen actualizada a pluma-app:0.6.0-beta.
-#   - El servicio Ollama interno está bajo el profile `bundled`. El instalador
-#     detecta si el usuario tiene Ollama nativo en el host con el modelo
-#     descargado y, si es así, activa el modo "host" (no se arranca el Ollama
-#     del contenedor; la app se conecta a host.docker.internal:11434). En caso
-#     contrario, activa el profile bundled y se arranca el Ollama Docker.
-#   - El servicio `app` declara `extra_hosts: host.docker.internal:host-gateway`
-#     para que `host.docker.internal` resuelva también desde contenedores en
-#     Linux (en Windows/macOS ya resuelve de fábrica).
+# - Se elimina el bind mount del Modelfile y las variables MODELO_NOMBRE y
+#   MODELFILE_PATH. El comportamiento del asistente (system prompt y
+#   parámetros de inferencia) vive ahora en schemas/pluma-runtime.yaml y se
+#   inyecta en cada llamada a Ollama desde el backend; ya no se crea un
+#   modelo derivado con `ollama create`.
+# - Imagen actualizada a pluma-app:0.6.0-beta.
+# - El servicio Ollama interno está bajo el profile `bundled`. El instalador
+#   detecta si el usuario tiene Ollama nativo en el host con el modelo
+#   descargado y, si es así, activa el modo "host" (no se arranca el Ollama
+#   del contenedor; la app se conecta a host.docker.internal:11434). En caso
+#   contrario, activa el profile bundled y se arranca el Ollama Docker.
+# - El servicio `app` declara `extra_hosts: host.docker.internal:host-gateway`
+#   para que `host.docker.internal` resuelva también desde contenedores en
+#   Linux (en Windows/macOS ya resuelve de fábrica).
+#
+# Revisión de endurecimiento (posterior a 0.6.0-beta):
+# - La imagen de Ollama queda fijada en este fichero y deja de leerse de .env
+#   (OLLAMA_IMAGE ya no existe como variable): el saneador del instalador
+#   elimina de .env las variables sensibles, pero OLLAMA_IMAGE quedaba fuera
+#   de esa lista y permitía sustituir desde un .env manipulado precisamente
+#   el contenedor que recibe el texto íntegro de los documentos y que tiene
+#   salida a Internet. Pendiente: fijar también por digest sha256 tras
+#   validar un build conocido-bueno (ver KNOWN_ISSUES.md).
+# - `restart: "no"` también en Ollama: con unless-stopped, Ollama rearrancaba
+#   con cada inicio de Docker Desktop ocupando varios GB de RAM aunque el
+#   usuario no estuviera usando PlumA.
+# - `cap_drop: ALL` también en el contenedor de Ollama, alineándolo con el de
+#   la app. VALIDAR en perfil bundled (CPU y, si aplica, GPU) antes de
+#   release; si Ollama requiere capacidades concretas, documentarlas aquí.
+# - El puerto publicado se interpola desde PUERTO (.env), que era el contrato
+#   documentado en README e INSTALACION pero no estaba cableado: PUERTO era
+#   configuración muerta y el instalador esperaba en un puerto distinto al
+#   publicado. La IP de publicación sigue fija en 127.0.0.1 y NO es editable.
+# - El healthcheck lee el puerto interno de la variable PUERTO del contenedor
+#   en lugar de hardcodear 8081.
 #
 # Configuración heredada de 0.5.0-beta:
-#   - El puerto de la aplicación se publica con sintaxis larga y fija:
-#       127.0.0.1:8082 -> 8081/tcp
-#   - No se usa variable editable para publicar el puerto de la interfaz.
-#   - La red de la app NO se marca como internal:true, porque en Docker
-#     Desktop/Compose podía impedir que Windows accediera al puerto publicado.
-#   - El bloqueo local se mantiene por capas: host_ip 127.0.0.1, middleware de
-#     Host/Origin/CSRF, OLLAMA_URL forzado y rechazo de configuración remota.
+# - El puerto de la aplicación se publica solo en 127.0.0.1 (loopback IPv4).
+# - La red de la app NO se marca como internal:true, porque en Docker
+#   Desktop/Compose podía impedir que Windows accediera al puerto publicado.
+#   Consecuencia honesta: el bloqueo de salida a red es APLICATIVO, no de
+#   red. Ver la sección de garantías del README y SECURITY_HARDENING.md.
+# - El bloqueo local se mantiene por capas: host_ip 127.0.0.1, middleware de
+#   Host/Origin/CSRF, OLLAMA_URL forzado y rechazo de configuración remota.
 #
 # Objetivo: impedir que PlumA se convierta accidentalmente en un servicio de red
 # o que envíe documentos a un endpoint LLM remoto, manteniendo la interfaz
@@ -37,7 +58,10 @@ name: pluma
 
 services:
   ollama:
-    image: ${OLLAMA_IMAGE:-ollama/ollama:0.21.2}
+    # Imagen fijada deliberadamente en el fichero, sin override desde .env.
+    # Para cambiarla hay que editar este fichero: es una decisión consciente
+    # y auditable, no una variable de entorno.
+    image: ollama/ollama:0.21.2
     container_name: pluma-ollama
     profiles:
       - bundled
@@ -46,12 +70,14 @@ services:
       - ./offline/models:/offline/models:ro
     expose:
       - "11434"
-    restart: unless-stopped
+    restart: "no"
     networks:
       - pluma-internal
       - pluma-egress
     security_opt:
       - no-new-privileges:true
+    cap_drop:
+      - ALL
     pids_limit: 512
     mem_limit: 6g
     cpus: 4
@@ -72,7 +98,6 @@ services:
       ALLOW_NETWORK_EXPOSURE: "false"
       PERFIL: bundled-local-locked
       PUERTO: "8081"
-
       # Parámetros funcionales permitidos.
       # MODELO_BASE controla qué modelo de Ollama se usa. El comportamiento
       # del asistente (system prompt y parámetros de inferencia) vive en
@@ -97,8 +122,10 @@ services:
       MAX_LONGITUD_VALOR_EXPORTACION: ${MAX_LONGITUD_VALOR_EXPORTACION:-50000}
       MAX_LONGITUD_EVIDENCIA_EXPORTACION: ${MAX_LONGITUD_EVIDENCIA_EXPORTACION:-8000}
     ports:
+      # Solo el número de puerto es editable (PUERTO en .env). La IP de
+      # publicación queda fija en loopback IPv4.
       - target: 8081
-        published: "8082"
+        published: "${PUERTO:-8082}"
         protocol: tcp
         host_ip: "127.0.0.1"
     volumes:
@@ -122,7 +149,7 @@ services:
     tmpfs:
       - /tmp:size=512M,mode=1777
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8081/api/estado', timeout=3).read()"]
+      test: ["CMD", "python", "-c", "import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:' + os.environ.get('PUERTO', '8081') + '/api/estado', timeout=3).read()"]
       interval: 30s
       timeout: 5s
       retries: 3

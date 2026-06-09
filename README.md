@@ -1,7 +1,3 @@
-<p align="center">
-  <img src="frontend/static/img/pluma-logo-full.png" alt="PlumA — AI Assistant for Archival Description" width="600">
-</p>
-
 # PlumA
 
 **AI Assistant for Archival Description.**
@@ -32,9 +28,12 @@ cualquier otro).
 
 ## Características principales
 
-- **Procesamiento local**. Tras instalar dependencias/modelos, los documentos no salen del equipo. El motor de IA
-  (Ollama) y la aplicación corren en contenedores Docker sin red
-  saliente más allá de la red interna entre servicios.
+- **Procesamiento local**. Tras instalar dependencias/modelos, los
+  documentos no salen del equipo: el motor de IA (Ollama) y la aplicación
+  corren en contenedores Docker, la interfaz solo se publica en
+  `127.0.0.1`, y el backend rechaza cualquier endpoint LLM que no sea
+  local. El detalle de qué garantiza cada capa (y qué no) está en la
+  sección "Garantías de aislamiento local" y en `SECURITY_HARDENING.md`.
 - **Trazabilidad honesta**. Cada propuesta incluye el fragmento literal
   del documento que la justifica y un indicador de confianza. Si el
   asistente no tiene evidencia para un campo, lo deja vacío.
@@ -63,25 +62,17 @@ El instalador detecta automáticamente si ya tienes Ollama funcionando
 en tu equipo:
 
 - Si **no** tienes Ollama, lo levanta dentro de Docker y descarga el
-  modelo base (unos 4-5 GB la primera vez).
-- Si **ya** tienes Ollama con el modelo base descargado, la aplicación
-  se conecta directamente a él (vía `host.docker.internal:11434`) y
-  evita duplicar el modelo dentro de Docker.
-- PlumA no crea modelos derivados en Ollama. Tras la instalación,
-  `ollama list` muestra únicamente el modelo base.
+  modelo por defecto (unos 4-5 GB la primera vez).
+- Si **ya** tienes Ollama con modelos descargados, la aplicación se
+  conecta directamente a él sin duplicar nada.
 
-Al terminar, abre el navegador en <http://localhost:8082> salvo que hayas cambiado `PUERTO` en `.env`.
+Al terminar, abre el navegador en <http://127.0.0.1:8082> salvo que
+hayas cambiado `PUERTO` en `.env`.
 
 Guía detallada y solución de problemas en [INSTALACION.md](INSTALACION.md).
 
-Para el uso cotidiano (cuando ya está instalado):
-
-- Arrancar: `iniciar.sh` / `iniciar.bat` — ligero, no reconstruye nada.
-- Detener: `detener.sh` / `detener.bat`.
-- Eliminar todo: `desinstalar.sh` / `desinstalar.bat`.
-
-`instalar.sh` / `instalar.bat` solo es necesario la primera vez, tras
-actualizar el repo o si quieres regenerar la configuración.
+Para detener: `detener.sh` / `detener.bat`.
+Para eliminar todo: `desinstalar.sh` / `desinstalar.bat`.
 
 ## Uso rápido
 
@@ -95,67 +86,69 @@ actualizar el repo o si quieres regenerar la configuración.
 
 ## Arquitectura
 
-```
-pluma/
-├── backend/              código Python (FastAPI)
-│   ├── app/
-│   │   ├── extractor.py      núcleo: esquema + documento → propuesta
-│   │   ├── router.py         validación y preparación de entrada
-│   │   ├── identificador_tipo.py
-│   │   ├── api.py            endpoints REST
-│   │   ├── bootstrap.py      verificación del modelo base en Ollama
-│   │   ├── llm.py            cliente Ollama; inyecta system y opciones en cada llamada
-│   │   └── main.py
-│   ├── Dockerfile
-│   └── pyproject.toml
-├── schemas/              normas, catálogos y configuración en YAML editable
-│   ├── pluma-runtime.yaml    system prompt y parámetros de inferencia
-│   ├── isad-g.yaml
-│   ├── dacs.yaml
-│   ├── isaar-cpf.yaml
-│   ├── isdf.yaml
-│   ├── isdiah.yaml
-│   ├── ric.yaml
-│   └── tipos-documentales.yaml
-├── frontend/             interfaz web estática (HTML, CSS y JavaScript)
-├── ejemplos/             documentos de prueba
-└── docker-compose.yml
-```
+    pluma/
+    ├── backend/              código Python (FastAPI)
+    │   ├── app/
+    │   │   ├── extractor.py      núcleo: esquema + documento → propuesta
+    │   │   ├── router.py         validación y preparación de entrada
+    │   │   ├── identificador_tipo.py
+    │   │   ├── api.py            endpoints REST
+    │   │   ├── bootstrap.py      preparación automática del modelo
+    │   │   ├── llm.py            cliente Ollama
+    │   │   └── main.py
+    │   ├── Dockerfile
+    │   └── pyproject.toml
+    ├── schemas/              normas, catálogos y runtime en YAML editable
+    │   ├── isad-g.yaml
+    │   ├── isaar-cpf.yaml
+    │   ├── isdf.yaml
+    │   ├── isdiah.yaml
+    │   ├── tipos-documentales.yaml
+    │   └── pluma-runtime.yaml    comportamiento del asistente (system
+    │                             prompt y parámetros de inferencia)
+    ├── frontend/             interfaz web estática (HTML, CSS y JavaScript)
+    ├── ejemplos/             documentos de prueba
+    └── docker-compose.yml
+
+Desde 0.6.0-beta ya no existe `Modelfile` ni se crea un modelo derivado
+con `ollama create`: el system prompt y los parámetros de inferencia
+viven en `schemas/pluma-runtime.yaml` y se inyectan en cada llamada a
+Ollama desde el backend.
 
 ## Esquemas editables
 
-Los esquemas de norma, el catálogo de tipos documentales y la
-configuración de runtime del asistente son ficheros YAML en la carpeta
-`schemas/`. Un archivero puede ampliar o afinar estos ficheros para su
-contexto (añadir tipos documentales específicos, matizar instrucciones
-del system prompt, cambiar parámetros de inferencia) sin tocar código
-ni reconstruir la imagen Docker. Basta con reiniciar el contenedor de
-la aplicación.
+Los esquemas de norma, el catálogo de tipos documentales y el runtime
+del asistente son ficheros YAML en la carpeta `schemas/`. Un archivero
+puede ampliar o afinar estos ficheros para su contexto (añadir tipos
+documentales específicos, matizar instrucciones) sin tocar código ni
+reconstruir la imagen Docker. Basta con reiniciar el contenedor de la
+aplicación.
 
-En particular, `schemas/pluma-runtime.yaml` contiene el system prompt
-completo del asistente y los parámetros de inferencia (temperature,
-num_ctx, etc.). PlumA no crea un modelo derivado en Ollama: inyecta el
-contenido de este fichero en cada petición, lo que permite cambiar de
-modelo base (`MODELO_BASE` en `.env`) sin regenerar nada.
+## Garantías de aislamiento local
 
-## Licencia y autoría
+El bloqueo local se aplica por capas, y conviene ser preciso sobre qué
+garantiza cada una:
 
-AGPL-3.0-or-later. Ver [LICENSE](LICENSE).
+- La interfaz se publica **solo en `127.0.0.1`** (loopback IPv4); ningún
+  otro equipo de la red puede alcanzarla.
+- El backend valida **Host/Origin y CSRF** con token sincronizado.
+- `OLLAMA_URL` queda **restringido a destinos locales** y la
+  configuración remota se rechaza (`PLUMA_STRICT_LOCAL`).
+- El instalador **sanea `.env`** eliminando las variables que podrían
+  relajar este bloqueo.
 
-La interfaz incluye una referencia visible al desarrollo por Víctor Villapalos y un enlace al texto de licencia servido localmente como `LICENSE.txt`.
-
-Esta es la versión libre del proyecto. Hay una versión comercial
-pensada para instituciones con necesidades de procesamiento por lotes,
-auditoría formal, integraciones avanzadas y soporte.
-
-## Autor
-
-Víctor Villapalos.
-
+Limitación reconocida: las redes Docker del despliegue **no** usan
+`internal: true`, porque en Docker Desktop ese modo impide entregar el
+puerto publicado al navegador del usuario. En consecuencia, la garantía
+de que los documentos no salen del equipo es **aplicativa y auditable en
+el código**, no un corte de red a nivel de Docker. El contenedor de
+Ollama necesita salida a Internet únicamente para descargar el modelo en
+el perfil `bundled`; el resto del funcionamiento es íntegramente local.
 
 ## Endurecimiento aplicado en esta versión
 
-Esta versión incorpora medidas adicionales de seguridad para una release local/formativa:
+Esta versión incorpora medidas adicionales de seguridad para una release
+local/formativa:
 
 - Rechazo temprano de cuerpos HTTP grandes antes del parseo multipart/JSON.
 - Eliminación del fallback de detección por extensión en `router.py`.
@@ -164,45 +157,88 @@ Esta versión incorpora medidas adicionales de seguridad para una release local/
 - Procesamiento PDF/DOCX/imagen en proceso hijo con timeout y límite de memoria.
 - Límite de concurrencia para `/api/describir`.
 - Tokens CSRF con TTL, almacén acotado y comprobación de mismo origen local exacto.
-- Restricción de `OLLAMA_URL` a destinos locales salvo `ALLOW_REMOTE_OLLAMA=true`.
+- Restricción de `OLLAMA_URL` a destinos locales.
 - Desactivación de `/docs`, `/redoc` y `/openapi.json` en FastAPI.
 - Validación defensiva de JSON devuelto por el modelo.
 - Sanitización de CSV frente a fórmulas.
-- Endurecimiento adicional del contenedor de aplicación.
+- Endurecimiento adicional de ambos contenedores (`cap_drop`, `no-new-privileges`, límites de recursos; `read_only` y tmpfs en la app).
 - Workflow de seguridad con Ruff, pytest, `pip-audit`, build Docker y Trivy.
 
 Sigue siendo una herramienta local de apoyo y formación, no una solución
-certificada para producción ni para tratamiento masivo de documentación sensible.
-
+certificada para producción ni para tratamiento masivo de documentación
+sensible.
 
 ## Ajuste de longitud y contexto
 
-Esta versión amplía los límites para descripciones archivísticas extensas. La interfaz no impone un límite de caracteres sobre los campos editables; los límites relevantes están en el backend y en la ventana de contexto del modelo local.
+La interfaz no impone un límite de caracteres sobre los campos
+editables; los límites relevantes están en el backend y en la ventana de
+contexto del modelo local.
 
 Variables principales en `.env`:
 
-- `MAX_LONGITUD_TEXTO_EXTRAIDO`: texto máximo extraído del documento que puede entrar en el prompt. Valor por defecto: `800000` caracteres.
-- `OLLAMA_NUM_CTX`: ventana de contexto solicitada a Ollama. Valor por defecto: `8192` tokens. Puede aumentarse en máquinas con suficiente VRAM/RAM para documentos largos.
-- `OLLAMA_NUM_PREDICT`: longitud máxima de respuesta del modelo. Valor por defecto: `4096` tokens.
-- `MAX_LONGITUD_VALOR_LLM`: longitud máxima admitida para cada valor propuesto por el modelo. Valor por defecto: `50000` caracteres.
+- `MAX_LONGITUD_TEXTO_EXTRAIDO`: texto máximo extraído del documento que
+  puede entrar en el prompt. Valor por defecto: `800000` caracteres.
+- `OLLAMA_NUM_CTX`: ventana de contexto solicitada a Ollama. Valor por
+  defecto: `8192` tokens.
+- `OLLAMA_NUM_PREDICT`: longitud máxima de respuesta del modelo. Valor
+  por defecto: `4096` tokens.
+- `MAX_LONGITUD_VALOR_LLM`: longitud máxima admitida para cada valor
+  propuesto por el modelo. Valor por defecto: `50000` caracteres.
 
-Aumentar estos valores puede mejorar la precisión en documentos largos, pero también incrementa consumo de memoria, tiempo de respuesta y carga del modelo. Para resultados extensos en “Título” y “Alcance y contenido”, conviene usar modelos con ventana de contexto amplia y suficiente RAM.
-
+Aumentar estos valores puede mejorar la precisión en documentos largos,
+pero también incrementa consumo de memoria, tiempo de respuesta y carga
+del modelo. **Atención**: en el perfil `bundled`, el contenedor de
+Ollama tiene un límite de memoria de 6 GB en `docker-compose.yml`;
+ventanas de contexto grandes (por ejemplo 32K) con modelos medianos
+pueden agotar ese límite y provocar que el contenedor sea terminado por
+falta de memoria. Si amplías `OLLAMA_NUM_CTX`, revisa también
+`mem_limit` del servicio `ollama` y la RAM disponible del equipo.
 
 ### Nota sobre campos largos
 
-Los campos editables de la interfaz se autoajustan para mostrar textos largos, especialmente `Título` y `Alcance y contenido`. Si se amplían los límites de contexto del modelo, la interfaz recalcula la altura después de mostrar la pantalla de resultados para evitar recortes visuales.
+Los campos editables de la interfaz se autoajustan para mostrar textos
+largos, especialmente `Título` y `Alcance y contenido`. Si se amplían
+los límites de contexto del modelo, la interfaz recalcula la altura
+después de mostrar la pantalla de resultados para evitar recortes
+visuales.
 
 ## Interfaz bilingüe y apagado desde la UI
 
-La interfaz incorpora un selector **ES/EN** en la cabecera. Este selector traduce la interfaz, botones, mensajes y las etiquetas normativas más habituales mostradas al usuario. Además, el idioma seleccionado se envía al backend como `idioma_salida`, de modo que las propuestas redactadas por el modelo se generan en el idioma activo de la interfaz.
+La interfaz incorpora un selector **ES/EN** en la cabecera. Este
+selector traduce la interfaz, botones, mensajes y las etiquetas
+normativas más habituales mostradas al usuario. Además, el idioma
+seleccionado se envía al backend como `idioma_salida`, de modo que las
+propuestas redactadas por el modelo se generan en el idioma activo de la
+interfaz.
 
-Para obtener una descripción en inglés, seleccione **EN** antes de procesar o pulse **Reprocesar** después de cambiar el idioma. Las evidencias se mantienen siempre como fragmentos literales del documento original para preservar la verificabilidad.
+Para obtener una descripción en inglés, seleccione **EN** antes de
+procesar o pulse **Reprocesar** después de cambiar el idioma. Las
+evidencias se mantienen siempre como fragmentos literales del documento
+original para preservar la verificabilidad.
 
-También se ha añadido un botón **Apagar** en la cabecera. Por seguridad, no monta el socket Docker ni ejecuta comandos del anfitrión: el botón detiene el proceso del servidor local de la aplicación. En el perfil `bundled`, el contenedor de Ollama puede quedar activo hasta ejecutar `detener.bat`, `detener.sh` o `docker compose down`.
+Existe también un botón **Apagar** en la cabecera, desactivado por
+defecto (`PERMITIR_APAGADO_UI=false`). Por seguridad, no monta el socket
+Docker ni ejecuta comandos del anfitrión: el botón detiene el proceso
+del servidor local de la aplicación. En el perfil `bundled`, el
+contenedor de Ollama queda activo hasta ejecutar `detener.bat`,
+`detener.sh` o `docker compose down`.
 
-El modelo base por defecto es `gemma4:e2b`. Puede cambiarse en `.env` mediante `MODELO_BASE`, pero debe existir en Ollama o poder descargarse en el perfil correspondiente. El comportamiento del asistente (system prompt y parámetros de inferencia) es independiente del modelo base y vive en `schemas/pluma-runtime.yaml`; cambiar de modelo no requiere regenerar nada en Ollama.
+El modelo base por defecto es `gemma4:e2b`. Puede cambiarse en `.env`
+mediante `MODELO_BASE`, pero debe existir en Ollama o poder descargarse
+en el perfil correspondiente.
 
+## Ficha técnica del proceso
+
+Cada análisis incorpora una ficha técnica ligera de auditoría. La ficha
+no incluye el texto del documento ni los valores descriptivos
+propuestos: recoge metadatos de proceso, versión de PlumA, norma usada,
+ruta de procesamiento, estado del sandbox de parsers, hash SHA-256 del
+fichero y recuento de evidencias localizadas, no localizadas o no
+verificables textualmente.
+
+Esta ficha mejora la trazabilidad técnica del proceso, pero no sustituye
+la revisión profesional del archivero ni una auditoría formal de
+seguridad.
 
 ## Documentación
 
@@ -214,41 +250,48 @@ El modelo base por defecto es `gemma4:e2b`. Puede cambiarse en `.env` mediante `
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — cómo contribuir al proyecto.
 - [`CLA.md`](CLA.md) — acuerdo de licencia para contribuyentes.
 
-
 ## Estado del proyecto
 
-**Versión 0.6.0-beta — beta pública.** Esta versión está pensada
-para evaluación por archiveros, formación, demostraciones y entornos
-de prueba controlados. **No es apta para producción** sin auditoría
-previa y sin las acciones que se describen en `SECURITY_HARDENING.md`
-("Pendiente para subir el nivel a auditoría profesional").
+**Versión 0.6.0-beta — beta pública.** Esta versión está pensada para
+evaluación por archiveros, formación, demostraciones y entornos de
+prueba controlados. **No es apta para producción** sin auditoría previa
+y sin las acciones que se describen en `SECURITY_HARDENING.md`
+("Pendiente para subir el nivel a auditoría profesional"). Las pruebas
+institucionales son bienvenidas por contacto directo.
+
+La rama `main` refleja la versión en desarrollo; la última versión
+publicada está en la página de
+[Releases](https://github.com/Token-Vean/Pluma/releases).
 
 Lo que se garantiza en esta versión:
 
-- El procesamiento es local (sin telemetría, sin envío a la nube).
+- El procesamiento es local (sin telemetría, sin envío a la nube; ver
+  "Garantías de aislamiento local" para el detalle por capas).
 - Las medidas de seguridad razonables están aplicadas (CSRF activo,
-  límites pre-parseo, sandbox de procesos para parsers, validación
-  de imagen-bomba y zip-bomb, restricción de Ollama remoto).
-- Tests automáticos en CI con auditoría de dependencias y escaneo
-  de imágenes Docker.
+  límites pre-parseo, sandbox de procesos para parsers, validación de
+  imagen-bomba y zip-bomb, restricción de Ollama remoto).
+- Tests automáticos en CI con auditoría de dependencias y escaneo de
+  imágenes Docker.
 - Documentación honesta sobre lo que falta (ver `KNOWN_ISSUES.md`).
 
+## Licencia y autoría
 
-## Licencia
-
-PlumA se distribuye bajo la **GNU Affero General Public License v3**
-(AGPL-3.0). Ver fichero `LICENSE`.
+PlumA se distribuye bajo la **GNU Affero General Public License v3 o
+posterior** (AGPL-3.0-or-later). Ver fichero [`LICENSE`](LICENSE).
 
 Esta licencia permite usar, modificar y redistribuir el software
 libremente, incluso comercialmente, con la condición de que cualquier
-modificación sustancial que se ofrezca como servicio en red debe
-hacerse también disponible bajo la misma licencia.
+modificación sustancial que se ofrezca como servicio en red debe hacerse
+también disponible bajo la misma licencia.
 
+La interfaz incluye una referencia visible al desarrollo por Víctor
+Villapalos y un enlace al texto de licencia servido localmente como
+`LICENSE.txt`.
 
-## Ficha técnica del proceso
+Esta es la versión libre del proyecto. Hay una versión comercial pensada
+para instituciones con necesidades de procesamiento por lotes, auditoría
+formal, integraciones avanzadas y soporte.
 
-Desde la versión 0.5.0-beta, cada análisis incorpora una ficha técnica ligera de auditoría. La ficha no incluye el texto del documento ni los valores descriptivos propuestos: recoge metadatos de proceso, versión de PlumA, norma usada, ruta de procesamiento, estado del sandbox de parsers, hash SHA-256 del fichero y recuento de evidencias localizadas, no localizadas o no verificables textualmente.
+## Autor
 
-A partir de la versión 0.6.0-beta, el campo `modelo` de la ficha técnica registra el nombre del modelo base real ejecutado (por ejemplo `gemma4:e2b`) en lugar del alias derivado utilizado en versiones anteriores. Esto mejora la trazabilidad: el registro refleja literalmente qué pesos del modelo se invocaron.
-
-Esta ficha mejora la trazabilidad técnica del proceso, pero no sustituye la revisión profesional del archivero ni una auditoría formal de seguridad.
+Víctor Villapalos.
