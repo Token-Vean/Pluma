@@ -54,8 +54,7 @@ coincida con el documentado.
 
 ## Cuándo aplicarlo
 
-Recomendado para **cualquier release pública firmada** (v0.6.0-beta y
-sucesivas). El comando no se ha aplicado aún en este repo porque
+Recomendado para **cualquier release pública firmada** (v0.7.0 y sucesivas). El comando no se ha aplicado aún en este repo porque
 requiere acceso a red en el momento de generar el fichero (este paso es
 manual y no automatizable desde el propio paquete que se distribuye).
 

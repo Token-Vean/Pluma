@@ -3,13 +3,13 @@
 # -----------------------------------------------------------------------------
 # Release pública local-first.
 #
-# Cambios 0.6.0-beta respecto a 0.5.0-beta:
+# Cambios v0.7.0 respecto a la línea 0.6.x:
 # - Se elimina el bind mount del Modelfile y las variables MODELO_NOMBRE y
 #   MODELFILE_PATH. El comportamiento del asistente (system prompt y
 #   parámetros de inferencia) vive ahora en schemas/pluma-runtime.yaml y se
 #   inyecta en cada llamada a Ollama desde el backend; ya no se crea un
 #   modelo derivado con `ollama create`.
-# - Imagen actualizada a pluma-app:0.6.0-beta.
+# - Imagen actualizada a pluma-app:0.7.0.
 # - El servicio Ollama interno está bajo el profile `bundled`. El instalador
 #   detecta si el usuario tiene Ollama nativo en el host con el modelo
 #   descargado y, si es así, activa el modo "host" (no se arranca el Ollama
@@ -19,7 +19,7 @@
 #   para que `host.docker.internal` resuelva también desde contenedores en
 #   Linux (en Windows/macOS ya resuelve de fábrica).
 #
-# Revisión de endurecimiento (posterior a 0.6.0-beta):
+# Revisión de endurecimiento v0.7.0:
 # - La imagen de Ollama queda fijada en este fichero y deja de leerse de .env
 #   (OLLAMA_IMAGE ya no existe como variable): el saneador del instalador
 #   elimina de .env las variables sensibles, pero OLLAMA_IMAGE quedaba fuera
@@ -41,8 +41,11 @@
 #   security_static_check.py sin relajar el check.
 # - El healthcheck lee el puerto interno de la variable PUERTO del contenedor
 #   en lugar de hardcodear 8081.
+# - Hardening v0.7.0: la imagen final elimina pip/setuptools/wheel del
+#   runtime para resolver las vulnerabilidades corregibles detectadas por
+#   Docker Scout en pip.
 #
-# Configuración heredada de 0.5.0-beta:
+# Configuración heredada y mantenida:
 # - El puerto de la aplicación se publica solo en 127.0.0.1 (loopback IPv4).
 # - La red de la app NO se marca como internal:true, porque en Docker
 #   Desktop/Compose podía impedir que Windows accediera al puerto publicado.
@@ -85,32 +88,52 @@ services:
     cpus: 4
 
   app:
-    image: pluma-app:0.6.0-beta
+    image: pluma-app:0.7.0
     build: ./backend
+    # Imagen construida en local; nunca se descarga de un registro.
+    pull_policy: never
     container_name: pluma-app
     environment:
       # Valores bloqueados de la release pública. PLUMA_OLLAMA_URL solo puede
       # apuntar a Ollama local validado por el backend: contenedor interno o
       # host.docker.internal si el instalador detecta el modelo ya instalado
       # en Ollama de Windows/macOS/Linux.
-      OLLAMA_URL: ${PLUMA_OLLAMA_URL:-http://ollama:11434}
-      PLUMA_OLLAMA_MODE: ${PLUMA_OLLAMA_MODE:-container}
+      OLLAMA_URL: ${PLUMA_OLLAMA_URL:-http://host.docker.internal:11434}
+      PLUMA_OLLAMA_MODE: ${PLUMA_OLLAMA_MODE:-host}
       PLUMA_STRICT_LOCAL: "true"
       ALLOW_REMOTE_OLLAMA: "false"
       ALLOW_NETWORK_EXPOSURE: "false"
-      PERFIL: bundled-local-locked
+      PERFIL: host-local-locked
       PUERTO: "8081"
       # Parámetros funcionales permitidos.
       # MODELO_BASE controla qué modelo de Ollama se usa. El comportamiento
       # del asistente (system prompt y parámetros de inferencia) vive en
       # schemas/pluma-runtime.yaml, no aquí.
       MODELO_BASE: ${MODELO_BASE:-gemma4:e2b}
-      MODELO_VISUAL_LECTURA: ${MODELO_VISUAL_LECTURA:-gemma4:e2b}
+      MODELO_VISUAL_LECTURA: ${MODELO_VISUAL_LECTURA:-qwen3.5:latest}
+      PLUMA_MODELOS_PREFERIDOS: ${PLUMA_MODELOS_PREFERIDOS:-pluma-texto,gemma4:e2b,gemma3:12b,qwen2.5:7b-instruct,llama3.1:8b}
+      PLUMA_MODELOS_VISUALES_PREFERIDOS: ${PLUMA_MODELOS_VISUALES_PREFERIDOS:-pluma-vision,qwen3.5:latest,qwen3-vl:8b,qwen3-vl:4b,qwen2.5vl:7b,qwen2.5vl:3b,gemma4:e2b}
       PLUMA_LECTURA_VISUAL_PREVIA: ${PLUMA_LECTURA_VISUAL_PREVIA:-true}
       MAX_TRANSCRIPCION_VISUAL: ${MAX_TRANSCRIPCION_VISUAL:-12000}
+      MAX_IMAGENES_LECTURA_VISUAL: ${MAX_IMAGENES_LECTURA_VISUAL:-6}
+      PLUMA_HIBRIDO_USAR_VISION: ${PLUMA_HIBRIDO_USAR_VISION:-false}
+      OLLAMA_VISION_NUM_CTX: ${OLLAMA_VISION_NUM_CTX:-4096}
+      OLLAMA_VISION_NUM_PREDICT: ${OLLAMA_VISION_NUM_PREDICT:-350}
+      PLUMA_VISION_MAX_LONG_EDGE: ${PLUMA_VISION_MAX_LONG_EDGE:-1280}
+      PLUMA_VISION_JPEG_QUALITY: ${PLUMA_VISION_JPEG_QUALITY:-78}
+      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-10m}
       USAR_SANDBOX_PARSERS: ${USAR_SANDBOX_PARSERS:-true}
       PLUMA_PDF_HIBRIDO_CON_IMAGENES: ${PLUMA_PDF_HIBRIDO_CON_IMAGENES:-false}
-      SANDBOX_TIMEOUT_SEGUNDOS: ${SANDBOX_TIMEOUT_SEGUNDOS:-90}
+      # OCR local previo a la IA: evita llamadas visuales lentas cuando Tesseract
+      # puede extraer texto suficiente del documento escaneado.
+      PLUMA_OCR_LOCAL: ${PLUMA_OCR_LOCAL:-true}
+      PLUMA_OCR_LANG: ${PLUMA_OCR_LANG:-spa+eng}
+      PLUMA_OCR_PSM: ${PLUMA_OCR_PSM:-6}
+      PLUMA_OCR_TIMEOUT_SEGUNDOS: ${PLUMA_OCR_TIMEOUT_SEGUNDOS:-60}
+      PLUMA_OCR_MAX_IMAGENES: ${PLUMA_OCR_MAX_IMAGENES:-20}
+      PLUMA_OCR_MIN_CARACTERES: ${PLUMA_OCR_MIN_CARACTERES:-80}
+      PLUMA_OCR_MIN_ALFANUM_RATIO: ${PLUMA_OCR_MIN_ALFANUM_RATIO:-0.35}
+      SANDBOX_TIMEOUT_SEGUNDOS: ${SANDBOX_TIMEOUT_SEGUNDOS:-120}
       SANDBOX_MEMORIA_MB: ${SANDBOX_MEMORIA_MB:-1536}
       INCLUIR_HASH_DOCUMENTO_AUDITORIA: ${INCLUIR_HASH_DOCUMENTO_AUDITORIA:-true}
       PERMITIR_APAGADO_UI: ${PERMITIR_APAGADO_UI:-false}

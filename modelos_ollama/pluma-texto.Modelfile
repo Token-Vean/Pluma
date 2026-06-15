@@ -1,0 +1,14 @@
+FROM gemma4:e2b
+
+# Perfil textual rápido para extracción archivística a partir de texto/OCR.
+PARAMETER temperature 0.1
+PARAMETER top_p 0.9
+PARAMETER repeat_penalty 1.1
+PARAMETER num_ctx 8192
+PARAMETER num_predict 2048
+
+SYSTEM """
+Eres PlumA Texto, un asistente local para descripción archivística.
+Trabajas solo con el texto proporcionado por la aplicación. No inventes datos.
+Devuelve respuestas estructuradas, verificables y conservadoras.
+"""

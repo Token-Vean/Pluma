@@ -58,7 +58,7 @@ echo.
 echo Eliminando contenedores y volumenes...
 docker compose down -v
 
-docker image rm pluma-app:0.6.0-beta >nul 2>&1
+docker image rm pluma-app:0.7.0 >nul 2>&1
 docker image rm pluma-app >nul 2>&1
 
 echo.

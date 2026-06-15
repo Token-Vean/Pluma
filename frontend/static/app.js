@@ -30,6 +30,7 @@ const estado = {
   normaActual: null,
   modoActual: 'esencial',
   ficheroActual: null,
+  ficherosActuales: [],
   propuestaActual: null,
   tipoDetectado: null,
   campos: [],       // todos los campos (extraibles + no extraibles)
@@ -37,6 +38,14 @@ const estado = {
   camposPersonalizados: null,  // Set<clave> con los campos seleccionados en modo personalizado, o null si está desactivado
   csrfToken: null,  // token anti-CSRF, se pide al backend al arrancar
   idioma: localStorage.getItem('idioma-ui') || 'es',
+  modelos: [],
+  modeloPorDefecto: null,
+  modeloPorDefectoVision: null,
+  modelosPreferidosVision: [],
+  modeloActual: localStorage.getItem('modelo-ollama') || null,
+  modeloSeleccionManual: false,
+  modeloBaseMotor: null,
+  extraerTipoDocumental: localStorage.getItem('extraer-tipo-documental') === 'true',
 };
 
 function documentoActivo() {
@@ -95,7 +104,7 @@ function escapeHtml(s) {
 const I18N = {
   es: {
     'brand.title': 'PlumA',
-    'brand.subtitle': 'Descripción asistida · v0.6.0-beta',
+    'brand.subtitle': 'Descripción asistida · v0.7.0',
     'language.label': 'Idioma',
     'language.title': 'Idioma de la interfaz',
     'engine.statusTitle': 'Estado del motor de IA',
@@ -123,6 +132,22 @@ const I18N = {
     'otherDocument.button': 'Otro documento',
     'controls.standard': 'Norma',
     'controls.mode': 'Modo',
+    'controls.model': 'Modelo',
+    'controls.detectType': 'Extraer tipo documental',
+    'controls.detectTypeTitle': 'Activa una pasada previa de IA para identificar el tipo documental. Desactivado: PlumA solo extrae campos de la norma seleccionada.',
+    'controls.detectTypeReprocessHint': 'Pulsa “Reprocesar” para aplicar el cambio de extracción de tipo documental.',
+    'model.title': 'Modelo de Ollama usado para describir',
+    'model.reprocessHint': 'Pulsa “Reprocesar” para describir con el nuevo modelo.',
+    'files.queueTitle': 'Archivos del documento',
+    'files.queueHelp': 'Puede reordenarlos antes de procesar.',
+    'files.processTitle': 'Procesar documento',
+    'files.processButton': 'Procesar documento',
+    'files.empty': 'Añada al menos un archivo.',
+    'files.added': '{n} archivo(s) añadidos.',
+    'files.remove': 'Quitar',
+    'files.moveUp': 'Subir',
+    'files.moveDown': 'Bajar',
+    'files.count': '{n} archivo(s)',
     'mode.essential': 'Esencial',
     'mode.complete': 'Completo',
     'mode.custom': 'Personalizado',
@@ -209,7 +234,7 @@ const I18N = {
   },
   en: {
     'brand.title': 'PlumA',
-    'brand.subtitle': 'Assisted description · v0.6.0-beta',
+    'brand.subtitle': 'Assisted description · v0.7.0',
     'language.label': 'Language',
     'language.title': 'Interface language',
     'engine.statusTitle': 'AI engine status',
@@ -237,6 +262,22 @@ const I18N = {
     'otherDocument.button': 'Another document',
     'controls.standard': 'Standard',
     'controls.mode': 'Mode',
+    'controls.model': 'Model',
+    'controls.detectType': 'Extract documentary type',
+    'controls.detectTypeTitle': 'Enable a preliminary AI pass to identify the documentary type. Disabled: PlumA only extracts fields from the selected standard.',
+    'controls.detectTypeReprocessHint': 'Click “Reprocess” to apply the documentary type extraction setting.',
+    'model.title': 'Ollama model used to describe',
+    'model.reprocessHint': 'Click “Reprocess” to describe with the new model.',
+    'files.queueTitle': 'Document files',
+    'files.queueHelp': 'You can reorder them before processing.',
+    'files.processTitle': 'Process document',
+    'files.processButton': 'Process document',
+    'files.empty': 'Add at least one file.',
+    'files.added': '{n} file(s) added.',
+    'files.remove': 'Remove',
+    'files.moveUp': 'Move up',
+    'files.moveDown': 'Move down',
+    'files.count': '{n} file(s)',
     'mode.essential': 'Essential',
     'mode.complete': 'Complete',
     'mode.custom': 'Custom',
@@ -500,6 +541,8 @@ function aplicarIdioma(idioma) {
   if (selector) selector.value = estado.idioma;
 
   if (estado.normas.length) actualizarSelectorNormas();
+  actualizarSelectorModelos();
+  renderColaArchivos();
   if (estado.propuestaActual) renderSesion();
 }
 
@@ -557,6 +600,108 @@ function actualizarSelectorNormas() {
 
   estado.normaActual = valorPrevio || primeraClave;
   selector.value = estado.normaActual;
+}
+
+async function cargarModelos() {
+  try {
+    const r = await fetch('/api/modelos');
+    const data = await r.json();
+    estado.modelos = Array.isArray(data.modelos) ? data.modelos : [];
+    estado.modeloPorDefecto = data.por_defecto || null;
+    estado.modeloPorDefectoVision = data.por_defecto_vision || null;
+    estado.modelosPreferidosVision = Array.isArray(data.preferidos_vision) ? data.preferidos_vision : [];
+    // Si la selección guardada ya no está disponible en Ollama, se descarta.
+    if (estado.modeloActual && !estado.modelos.includes(estado.modeloActual)) {
+      estado.modeloActual = null;
+      estado.modeloSeleccionManual = false;
+    }
+  } catch (err) {
+    // Sin lista de modelos la interfaz sigue funcionando con el modelo por defecto.
+    estado.modelos = [];
+  }
+  actualizarSelectorModelos();
+  actualizarIndicadorModelo();
+}
+
+function obtenerSelectoresModelo() {
+  const doc = documentoActivo();
+  const selectores = Array.from(doc.querySelectorAll('.selector-modelo-ollama'));
+  if (doc !== documentoPrincipal) {
+    for (const el of documentoPrincipal.querySelectorAll('.selector-modelo-ollama')) {
+      if (!selectores.includes(el)) selectores.push(el);
+    }
+  }
+  return selectores;
+}
+
+function esArchivoVisual(fichero) {
+  if (!fichero) return false;
+  const tipo = (fichero.type || '').toLowerCase();
+  const nombre = (fichero.name || '').toLowerCase();
+  return tipo.startsWith('image/') || /\.(jpg|jpeg|png|tif|tiff|webp)$/i.test(nombre);
+}
+
+function colaRequiereVision() {
+  return (estado.ficherosActuales || []).some(esArchivoVisual);
+}
+
+function seleccionarModeloAutomaticoParaCola() {
+  if (estado.modeloSeleccionManual) return;
+  const recomendado = colaRequiereVision() ? estado.modeloPorDefectoVision : estado.modeloPorDefecto;
+  if (recomendado && estado.modelos.includes(recomendado) && estado.modeloActual !== recomendado) {
+    estado.modeloActual = recomendado;
+    actualizarSelectorModelos();
+  }
+}
+
+function actualizarSelectorModelos() {
+  const selectores = obtenerSelectoresModelo();
+  if (selectores.length === 0) return;
+
+  // Selección: la guardada si sigue disponible; si no, el por defecto; si no, el primero.
+  let elegido = estado.modelos[0] || '';
+  if (estado.modeloActual && estado.modelos.includes(estado.modeloActual)) {
+    elegido = estado.modeloActual;
+  } else if (estado.modeloPorDefecto && estado.modelos.includes(estado.modeloPorDefecto)) {
+    elegido = estado.modeloPorDefecto;
+  }
+  estado.modeloActual = elegido || null;
+
+  const sufijoDefecto = estado.idioma === 'en' ? ' (default)' : ' (por defecto)';
+  const sufijoVision = estado.idioma === 'en' ? ' (vision)' : ' (visión)';
+
+  for (const selector of selectores) {
+    selector.innerHTML = '';
+    const bloque = selector.closest('.bloque-control, .modelo-previo');
+
+    if (estado.modelos.length === 0) {
+      if (bloque) bloque.style.display = 'none';
+      continue;
+    }
+    if (bloque) bloque.style.display = '';
+
+    for (const nombre of estado.modelos) {
+      const op = crearElemento('option');
+      op.value = nombre;
+      if (estado.modeloPorDefecto && nombre === estado.modeloPorDefecto) {
+        op.textContent = nombre + sufijoDefecto;
+      } else if (estado.modeloPorDefectoVision && nombre === estado.modeloPorDefectoVision) {
+        op.textContent = nombre + sufijoVision;
+      } else {
+        op.textContent = nombre;
+      }
+      selector.appendChild(op);
+    }
+    selector.value = elegido;
+  }
+}
+
+
+
+function actualizarIndicadorModelo() {
+  const texto = $('estado-texto');
+  if (!texto || !estado.motorListo) return;
+  texto.textContent = estado.modeloActual || estado.modeloBaseMotor || t('engine.ready');
 }
 
 
@@ -650,7 +795,11 @@ function irABienvenida() {
   mostrarPantalla('bienvenida');
   $('acciones-pie').style.display = 'none';
   estado.ficheroActual = null;
+  estado.ficherosActuales = [];
   estado.propuestaActual = null;
+  estado.tipoDetectado = null;
+  estado.campos = [];
+  renderColaArchivos();
   $('estado-trabajo-texto').textContent = t('status.ready');
 }
 
@@ -677,8 +826,11 @@ async function comprobarEstadoMotor() {
 
     if (s.listo) {
       punto.classList.add('ok');
-      texto.textContent = s.modelo_base || t('engine.ready');
       estado.motorListo = true;
+      estado.modeloBaseMotor = s.modelo_base || null;
+      // El indicador muestra el modelo realmente activo (la selección del
+      // usuario si la hay; si no, el modelo por defecto del motor).
+      texto.textContent = estado.modeloActual || s.modelo_base || t('engine.ready');
       return true;
     }
 
@@ -724,6 +876,7 @@ async function esperarMotorYArrancar() {
   }
 
   await cargarNormas();
+  await cargarModelos();
   irABienvenida();
 }
 
@@ -755,12 +908,6 @@ function inicializarDropZone() {
   const dz = $('drop-zone');
   const input = $('selector-fichero');
 
-  // En modo flotante (Document Picture-in-Picture) el <body> se mueve a otro
-  // document/window. Algunos navegadores abren el selector de fichero pero no
-  // propagan bien el cambio si el input oculto pertenece al documento original
-  // o conserva el mismo valor. Por eso se crea un input temporal en el
-  // ownerDocument real del botón pulsado. También soluciona la selección
-  // repetida del mismo fichero.
   dz.addEventListener('click', (e) => abrirSelectorFichero(e.currentTarget));
   dz.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' || e.key === ' ') {
@@ -778,7 +925,7 @@ function inicializarDropZone() {
     e.preventDefault();
     dz.classList.remove('activa');
     if (e.dataTransfer.files.length > 0) {
-      procesarFichero(e.dataTransfer.files[0]);
+      agregarFicherosACola(Array.from(e.dataTransfer.files));
     }
   });
 
@@ -786,15 +933,18 @@ function inicializarDropZone() {
   // o navegador antiguo lo activa directamente.
   input.addEventListener('change', (e) => {
     if (e.target.files.length > 0) {
-      procesarFichero(e.target.files[0]);
+      agregarFicherosACola(Array.from(e.target.files));
       e.target.value = '';
     }
   });
 
+  $('boton-procesar-documento')?.addEventListener('click', procesarColaActual);
   $('boton-otro-documento').addEventListener('click', irABienvenida);
   $('boton-reprocesar').addEventListener('click', () => {
-    if (estado.ficheroActual) procesarFichero(estado.ficheroActual);
+    if (estado.ficherosActuales.length > 0) procesarFicheros(estado.ficherosActuales);
   });
+
+  renderColaArchivos();
 }
 
 async function abrirSelectorFichero(origen) {
@@ -816,7 +966,7 @@ async function abrirSelectorFichero(origen) {
 
   // En Document Picture-in-Picture el DOM visible está en otra ventana, pero la
   // lógica de red y estado sigue viviendo en la ventana principal. Para no
-  // perder el fichero seleccionado, probamos primero el File System Access API
+  // perder los ficheros seleccionados, probamos primero el File System Access API
   // de la ventana principal y después el de la ventana activa.
   const candidatosPicker = [];
   if (typeof window.showOpenFilePicker === 'function') candidatosPicker.push(window);
@@ -824,11 +974,15 @@ async function abrirSelectorFichero(origen) {
 
   for (const win of candidatosPicker) {
     try {
-      const handles = await win.showOpenFilePicker({ multiple: false, types: pickerTypes });
+      const handles = await win.showOpenFilePicker({ multiple: true, types: pickerTypes });
       if (handles && handles.length > 0) {
-        const file = await handles[0].getFile();
-        if (file) {
-          await procesarFichero(file);
+        const files = [];
+        for (const h of handles) {
+          const file = await h.getFile();
+          if (file) files.push(file);
+        }
+        if (files.length > 0) {
+          agregarFicherosACola(files);
           return;
         }
       }
@@ -848,6 +1002,7 @@ function abrirSelectorConInputTemporal(doc, accept) {
   return new Promise((resolve) => {
     const temporal = doc.createElement('input');
     temporal.type = 'file';
+    temporal.multiple = true;
     temporal.accept = accept;
     temporal.style.position = 'fixed';
     temporal.style.left = '-10000px';
@@ -873,7 +1028,7 @@ function abrirSelectorConInputTemporal(doc, accept) {
     temporal.addEventListener('change', async () => {
       try {
         if (temporal.files && temporal.files.length > 0) {
-          await procesarFichero(temporal.files[0]);
+          agregarFicherosACola(Array.from(temporal.files));
         }
       } finally {
         terminar();
@@ -891,35 +1046,165 @@ function abrirSelectorConInputTemporal(doc, accept) {
   });
 }
 
+function agregarFicherosACola(ficheros) {
+  const nuevos = (ficheros || []).filter(Boolean);
+  if (nuevos.length === 0) return;
+  estado.ficherosActuales = estado.ficherosActuales.concat(nuevos);
+  seleccionarModeloAutomaticoParaCola();
+  renderColaArchivos();
+  toast(t('files.added', { n: nuevos.length }), 'ok');
+}
+
+function moverFicheroCola(indice, delta) {
+  const destino = indice + delta;
+  if (destino < 0 || destino >= estado.ficherosActuales.length) return;
+  const copia = estado.ficherosActuales.slice();
+  const [item] = copia.splice(indice, 1);
+  copia.splice(destino, 0, item);
+  estado.ficherosActuales = copia;
+  seleccionarModeloAutomaticoParaCola();
+  renderColaArchivos();
+}
+
+function quitarFicheroCola(indice) {
+  const copia = estado.ficherosActuales.slice();
+  copia.splice(indice, 1);
+  estado.ficherosActuales = copia;
+  seleccionarModeloAutomaticoParaCola();
+  renderColaArchivos();
+}
+
+function renderColaArchivos() {
+  const contenedor = $('cola-archivos');
+  const lista = $('lista-archivos');
+  const boton = $('boton-procesar-documento');
+  if (!contenedor || !lista || !boton) return;
+
+  lista.innerHTML = '';
+  const ficheros = estado.ficherosActuales || [];
+  contenedor.classList.toggle('cola-archivos-vacia', ficheros.length === 0);
+  boton.disabled = ficheros.length === 0;
+
+  for (const [i, fichero] of ficheros.entries()) {
+    const li = crearElemento('li');
+    li.className = 'item-archivo';
+
+    const numero = crearElemento('span');
+    numero.className = 'item-archivo-numero mono';
+    numero.textContent = String(i + 1).padStart(2, '0');
+
+    const datos = crearElemento('div');
+    datos.className = 'item-archivo-datos';
+
+    const nombre = crearElemento('div');
+    nombre.className = 'item-archivo-nombre';
+    nombre.textContent = fichero.name || ('archivo_' + (i + 1));
+
+    const meta = crearElemento('div');
+    meta.className = 'item-archivo-meta mono';
+    meta.textContent = formatearBytes(fichero.size || 0);
+
+    datos.appendChild(nombre);
+    datos.appendChild(meta);
+
+    const acciones = crearElemento('div');
+    acciones.className = 'item-archivo-acciones';
+
+    const subir = crearElemento('button');
+    subir.type = 'button';
+    subir.className = 'boton-mini';
+    subir.textContent = '↑';
+    subir.title = t('files.moveUp');
+    subir.disabled = i === 0;
+    subir.addEventListener('click', () => moverFicheroCola(i, -1));
+
+    const bajar = crearElemento('button');
+    bajar.type = 'button';
+    bajar.className = 'boton-mini';
+    bajar.textContent = '↓';
+    bajar.title = t('files.moveDown');
+    bajar.disabled = i === ficheros.length - 1;
+    bajar.addEventListener('click', () => moverFicheroCola(i, 1));
+
+    const quitar = crearElemento('button');
+    quitar.type = 'button';
+    quitar.className = 'boton-mini boton-mini-peligro';
+    quitar.textContent = '×';
+    quitar.title = t('files.remove');
+    quitar.addEventListener('click', () => quitarFicheroCola(i));
+
+    acciones.appendChild(subir);
+    acciones.appendChild(bajar);
+    acciones.appendChild(quitar);
+
+    li.appendChild(numero);
+    li.appendChild(datos);
+    li.appendChild(acciones);
+    lista.appendChild(li);
+  }
+}
+
+function procesarColaActual() {
+  if (!estado.ficherosActuales || estado.ficherosActuales.length === 0) {
+    toast(t('files.empty'), 'error');
+    return;
+  }
+  procesarFicheros(estado.ficherosActuales);
+}
+
 
 /* =============================================================================
    6. Procesamiento
    ========================================================================== */
 
-async function procesarFichero(fichero) {
+function resumenFicheros(ficheros) {
+  if (!ficheros || ficheros.length === 0) return '—';
+  const total = ficheros.reduce((acc, f) => acc + (f.size || 0), 0);
+  if (ficheros.length === 1) {
+    return (ficheros[0].name || 'archivo') + ' · ' + formatearBytes(total);
+  }
+  return t('files.count', { n: ficheros.length }) + ' · ' + formatearBytes(total);
+}
+
+function nombreDocumentoTrabajo(ficheros) {
+  if (!ficheros || ficheros.length === 0) return '—';
+  if (ficheros.length === 1) return ficheros[0].name || 'archivo';
+  return 'Documento compuesto (' + ficheros.length + ' archivos)';
+}
+
+async function procesarFicheros(ficheros) {
   if (!estado.motorListo) {
     toast(t('processing.notReady'), 'error');
     return;
   }
 
-  estado.ficheroActual = fichero;
+  const archivos = (ficheros || []).filter(Boolean);
+  if (archivos.length === 0) {
+    toast(t('files.empty'), 'error');
+    return;
+  }
+
+  estado.ficherosActuales = archivos.slice();
+  estado.ficheroActual = archivos[0] || null; // compatibilidad con código histórico
 
   const overlay = $('overlay-procesando');
   overlay.classList.add('activo');
   $('overlay-mensaje').textContent = t('processing.overlay');
-  $('overlay-meta').textContent =
-    fichero.name + ' · ' + formatearBytes(fichero.size);
+  $('overlay-meta').textContent = resumenFicheros(archivos);
   $('estado-trabajo-texto').textContent = t('status.processing');
 
   const fd = new FormData();
-  fd.append('fichero', fichero);
+  for (const fichero of archivos) {
+    fd.append('ficheros', fichero, fichero.name || 'archivo');
+  }
   fd.append('norma', estado.normaActual);
   fd.append('modo', estado.modoActual);
   if (estado.modoActual === 'personalizado' && estado.camposPersonalizados) {
     fd.append('campos', Array.from(estado.camposPersonalizados).join(','));
   }
-  fd.append('detectar_tipo', 'true');
+  fd.append('detectar_tipo', estado.extraerTipoDocumental ? 'true' : 'false');
   fd.append('idioma_salida', estado.idioma);
+  if (estado.modeloActual) fd.append('modelo', estado.modeloActual);
 
   try {
     const r = await fetchProtegido('/api/describir', { method: 'POST', body: fd });
@@ -968,6 +1253,7 @@ async function procesarFichero(fichero) {
     overlay.classList.remove('activo');
   }
 }
+
 
 
 /* =============================================================================
@@ -1793,10 +2079,37 @@ function inicializarControles() {
   $('selector-norma').addEventListener('change', (e) => {
     estado.normaActual = e.target.value;
     actualizarBotonesExportacion();
-    if (estado.ficheroActual) {
+    if (estado.ficherosActuales.length > 0 && estado.propuestaActual) {
       toast(t('norms.reprocessHint'));
     }
   });
+
+  // Selector de modelo de Ollama
+  for (const selectorModelo of obtenerSelectoresModelo()) {
+    selectorModelo.addEventListener('change', (e) => {
+      estado.modeloActual = e.target.value;
+      estado.modeloSeleccionManual = true;
+      try { localStorage.setItem('modelo-ollama', estado.modeloActual); } catch (_) {}
+      actualizarSelectorModelos();
+      actualizarIndicadorModelo();
+      if (estado.ficherosActuales.length > 0 && estado.propuestaActual) {
+        toast(t('model.reprocessHint'));
+      }
+    });
+  }
+
+  // Detección opcional de tipo documental
+  const checkTipoDocumental = $('check-extraer-tipo-documental');
+  if (checkTipoDocumental) {
+    checkTipoDocumental.checked = estado.extraerTipoDocumental;
+    checkTipoDocumental.addEventListener('change', (e) => {
+      estado.extraerTipoDocumental = !!e.target.checked;
+      try { localStorage.setItem('extraer-tipo-documental', estado.extraerTipoDocumental ? 'true' : 'false'); } catch (_) {}
+      if (estado.ficherosActuales.length > 0 && estado.propuestaActual) {
+        toast(t('controls.detectTypeReprocessHint'));
+      }
+    });
+  }
 
   // Selector de modo
   $$('#selector-modo .modo').forEach(btn => {

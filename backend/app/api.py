@@ -21,6 +21,7 @@ import json
 import logging
 import os
 import signal
+import time
 import uuid
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -31,7 +32,7 @@ from fastapi.responses import Response
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from . import auditoria, extractor, identificador_tipo, router as router_entrada
+from . import auditoria, extractor, identificador_tipo, llm, router as router_entrada
 from .router import ErrorValidacion
 from .version import APP_VERSION
 from .security_policy import security_status
@@ -44,13 +45,19 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 
 MODELO = os.getenv("MODELO_BASE", "gemma4:e2b")
+MAX_DESCRIBIR_FILES = max(1, int(os.getenv("MAX_DESCRIBIR_FILES", "10")))
+MAX_DESCRIBIR_TOTAL_BYTES = int(os.getenv("MAX_DESCRIBIR_TOTAL_BYTES", str(150 * 1024 * 1024)))
+MAX_IMAGENES_DOCUMENTO_COMPUESTO = max(1, int(os.getenv("MAX_IMAGENES_DOCUMENTO_COMPUESTO", "30")))
+# Por defecto, la ruta híbrida evita reenviar imágenes si ya hay texto.
+# La visión directa queda reservada para documentos sin capa textual.
+PLUMA_HIBRIDO_USAR_VISION = os.getenv("PLUMA_HIBRIDO_USAR_VISION", "false").strip().lower() in {"1", "true", "yes", "si", "sí", "on"}
 DIR_ESQUEMAS = Path(os.getenv("DIR_ESQUEMAS", "/app/schemas"))
 RUTA_CATALOGO_TIPOS = DIR_ESQUEMAS / "tipos-documentales.yaml"
 
-# El multipart añade cabeceras y límites alrededor del fichero. Permitimos
-# 2 MB de margen sobre el tamaño documental admitido por router.py.
+# El multipart añade cabeceras y límites alrededor del fichero. En documentos
+# compuestos permitimos varios ficheros, pero mantenemos límite total explícito.
 MAX_DESCRIBIR_BODY_BYTES = int(
-    os.getenv("MAX_DESCRIBIR_BODY_BYTES", str(router_entrada.TAMANO_MAXIMO_BYTES + 2 * 1024 * 1024))
+    os.getenv("MAX_DESCRIBIR_BODY_BYTES", str(MAX_DESCRIBIR_TOTAL_BYTES + 4 * 1024 * 1024))
 )
 MAX_EXPORT_BODY_BYTES = int(os.getenv("MAX_EXPORT_BODY_BYTES", str(15 * 1024 * 1024)))
 MAX_CAMPOS_EXPORTACION = int(os.getenv("MAX_CAMPOS_EXPORTACION", "250"))
@@ -260,6 +267,181 @@ async def listar_tipos():
     }
 
 
+@router.get("/modelos")
+async def listar_modelos_ollama():
+    """Lista los modelos descargados en Ollama y elige uno por defecto."""
+    try:
+        modelos = await llm.modelos_disponibles()
+    except Exception as err:
+        logger.warning("No se pudieron listar modelos de Ollama: %s", err)
+        raise HTTPException(503, "No se pudieron consultar los modelos locales de Ollama.") from err
+
+    elegido_texto = llm.elegir_nombre_preferido(modelos, vision=False)
+    elegido_vision = llm.elegir_nombre_preferido(modelos, vision=True)
+    return {
+        "modelos": modelos,
+        "por_defecto": elegido_texto,
+        "por_defecto_texto": elegido_texto,
+        "por_defecto_vision": elegido_vision,
+        "preferidos": [MODELO, *llm.MODELOS_PREFERIDOS],
+        "preferidos_vision": llm.MODELOS_VISUALES_PREFERIDOS,
+        "ollama_url": llm.OLLAMA_URL,
+    }
+
+
+async def _resolver_modelo_solicitado(modelo: str | None, *, requiere_vision: bool = False) -> str:
+    """Valida el modelo elegido por la interfaz o selecciona uno local."""
+    modelos = await llm.modelos_disponibles()
+    if not modelos:
+        raise HTTPException(503, "No hay modelos descargados en Ollama.")
+
+    solicitado = (modelo or "").strip()
+    if solicitado:
+        for disponible in modelos:
+            if llm._equivale_modelo(solicitado, disponible):
+                return disponible
+        raise HTTPException(400, f"Modelo no disponible en Ollama: {solicitado}")
+
+    elegido = llm.elegir_nombre_preferido(modelos, vision=requiere_vision)
+    if not elegido:
+        raise HTTPException(503, "No hay modelos descargados en Ollama.")
+    return elegido
+
+
+def _archivos_de_peticion(
+    fichero: UploadFile | None,
+    ficheros: list[UploadFile] | None,
+) -> list[UploadFile]:
+    archivos: list[UploadFile] = []
+    if ficheros:
+        archivos.extend([a for a in ficheros if a is not None])
+    if fichero is not None:
+        archivos.append(fichero)
+
+    if not archivos:
+        raise HTTPException(400, "Debe subir al menos un fichero.")
+    if len(archivos) > MAX_DESCRIBIR_FILES:
+        raise HTTPException(
+            400,
+            f"Demasiados ficheros para un documento compuesto. Máximo: {MAX_DESCRIBIR_FILES}.",
+        )
+    return archivos
+
+
+def _combinar_documentos(docs: list[router_entrada.DocumentoProcesado]) -> router_entrada.DocumentoProcesado:
+    """Crea una única entrada lógica a partir de varios ficheros ordenados."""
+    if len(docs) == 1:
+        return docs[0]
+
+    partes_texto: list[str] = []
+    imagenes: list[bytes] = []
+    rutas: set[str] = set()
+    paginas_total = 0
+    paginas_conocidas = False
+    tamano_total = 0
+    nombres: list[str] = []
+    tipos: set[str] = set()
+
+    for i, doc in enumerate(docs, start=1):
+        nombre = doc.nombre_original or f"archivo_{i}"
+        nombres.append(nombre)
+        rutas.add(doc.ruta)
+        tipos.add(doc.tipo_mime)
+        tamano_total += doc.tamano_bytes
+
+        if doc.paginas is not None:
+            paginas_total += doc.paginas
+            paginas_conocidas = True
+
+        if doc.entrada.texto:
+            partes_texto.append(
+                f"[Archivo {i} de {len(docs)}: {nombre}]\n" + doc.entrada.texto.strip()
+            )
+        if doc.entrada.imagenes:
+            imagenes.extend(doc.entrada.imagenes)
+
+    if len(imagenes) > MAX_IMAGENES_DOCUMENTO_COMPUESTO:
+        raise HTTPException(
+            400,
+            "El documento compuesto genera demasiadas imágenes para análisis visual. "
+            f"Máximo: {MAX_IMAGENES_DOCUMENTO_COMPUESTO}.",
+        )
+
+    texto = "\n\n---\n\n".join(partes_texto).strip() or None
+    ruta: router_entrada.Ruta
+    if texto and imagenes:
+        ruta = "hibrida"
+    elif imagenes:
+        ruta = "vision"
+    else:
+        ruta = "texto"
+
+    nombre_compuesto = "Documento compuesto (" + str(len(docs)) + " archivos): " + "; ".join(nombres)
+    if len(nombre_compuesto) > 500:
+        nombre_compuesto = "Documento compuesto (" + str(len(docs)) + " archivos)"
+
+    entrada = extractor.Entrada(texto=texto, imagenes=imagenes or None)
+    return router_entrada.DocumentoProcesado(
+        entrada=entrada,
+        ruta=ruta,
+        nombre_original=nombre_compuesto,
+        tipo_mime="multipart/mixed" if len(tipos) > 1 else next(iter(tipos), "multipart/mixed"),
+        tamano_bytes=tamano_total,
+        paginas=paginas_total if paginas_conocidas else None,
+    )
+
+
+async def _procesar_archivos_subidos(archivos: list[UploadFile], peticion_id: str) -> tuple[router_entrada.DocumentoProcesado, str | None, list[dict[str, Any]]]:
+    """Lee, valida y combina uno o varios ficheros subidos."""
+    docs: list[router_entrada.DocumentoProcesado] = []
+    archivos_meta: list[dict[str, Any]] = []
+    total = 0
+    h = hashlib.sha256() if INCLUIR_HASH_DOCUMENTO_AUDITORIA else None
+
+    for i, archivo in enumerate(archivos, start=1):
+        contenido = await archivo.read()
+        total += len(contenido)
+        if total > MAX_DESCRIBIR_TOTAL_BYTES:
+            raise HTTPException(
+                413,
+                f"El conjunto de ficheros supera el tamaño máximo total "
+                f"({MAX_DESCRIBIR_TOTAL_BYTES} bytes).",
+            )
+
+        nombre = archivo.filename or f"archivo_{i}"
+        if h is not None:
+            h.update(str(i).encode("utf-8"))
+            h.update(b"\0")
+            h.update(nombre.encode("utf-8", errors="replace"))
+            h.update(b"\0")
+            h.update(contenido)
+
+        try:
+            doc = router_entrada.procesar(contenido, nombre)
+        except ErrorValidacion as e:
+            _log_peticion("describir_validacion_fallida", peticion_id, archivo=i, error=str(e))
+            raise HTTPException(400, f"Archivo {i} ({nombre}): {e}") from None
+        except Exception as err:
+            logger.exception("[%s] Error inesperado en router para archivo %d", peticion_id, i)
+            raise HTTPException(500, f"Error al procesar el archivo {i} ({nombre}).") from err
+        finally:
+            contenido = b""
+
+        docs.append(doc)
+        archivos_meta.append({
+            "orden": i,
+            "nombre": doc.nombre_original,
+            "tipo_mime": doc.tipo_mime,
+            "tamano_bytes": doc.tamano_bytes,
+            "paginas": doc.paginas,
+            "ruta_procesamiento": doc.ruta,
+        })
+
+    doc_compuesto = _combinar_documentos(docs)
+    sha256_documento = h.hexdigest() if h is not None else None
+    return doc_compuesto, sha256_documento, archivos_meta
+
+
 async def _apagar_proceso_app() -> None:
     """Detiene únicamente el proceso de la aplicación tras enviar la respuesta HTTP."""
     await asyncio.sleep(0.35)
@@ -292,15 +474,18 @@ async def apagar_desde_interfaz():
 
 @router.post("/describir")
 async def describir(
-    fichero: UploadFile = File(...),
+    ficheros: list[UploadFile] | None = File(None),
+    fichero: UploadFile | None = File(None),
     norma: str = Form(...),
     modo: str = Form("esencial"),
     campos: str | None = Form(None),
-    detectar_tipo: bool = Form(True),
+    detectar_tipo: bool = Form(False),
     idioma_salida: str = Form("es"),
+    modelo: str | None = Form(None),
 ):
-    """Procesa un documento y devuelve la propuesta de descripción."""
+    """Procesa uno o varios ficheros que forman una única unidad documental."""
     peticion_id = str(uuid.uuid4())[:8]
+    _t_inicio = time.monotonic()
 
     if norma not in NORMAS_DISPONIBLES:
         raise HTTPException(400, f"Norma desconocida: {norma}")
@@ -311,34 +496,90 @@ async def describir(
     if idioma_salida not in IDIOMAS_SALIDA_ADMITIDOS:
         raise HTTPException(400, f"Idioma de salida no admitido: {idioma_salida}")
 
+    archivos = _archivos_de_peticion(fichero=fichero, ficheros=ficheros)
+
     async with _SEM_PROCESAMIENTO:
-        contenido = await fichero.read()
-        sha256_documento = (
-            hashlib.sha256(contenido).hexdigest()
-            if INCLUIR_HASH_DOCUMENTO_AUDITORIA else None
-        )
         _log_peticion(
             "describir_inicio",
             peticion_id,
             norma=norma,
             modo=modo,
-            tamano=len(contenido),
+            num_archivos=len(archivos),
             detectar_tipo=detectar_tipo,
             idioma_salida=idioma_salida,
+            modelo_solicitado=(modelo or "auto"),
         )
 
-        try:
-            doc = router_entrada.procesar(contenido, fichero.filename or "sin_nombre")
-        except ErrorValidacion as e:
-            _log_peticion("describir_validacion_fallida", peticion_id, error=str(e))
-            raise HTTPException(400, str(e)) from None
-        except Exception as err:
-            logger.exception("[%s] Error inesperado en router", peticion_id)
-            raise HTTPException(500, "Error al procesar el fichero.") from err
-        finally:
-            # No es borrado seguro de memoria en Python; solo elimina la referencia
-            # local lo antes posible. La documentación evita prometer borrado seguro.
-            contenido = b""
+        doc, sha256_documento, archivos_meta = await _procesar_archivos_subidos(archivos, peticion_id)
+        requiere_vision = bool(doc.entrada.imagenes)
+        modelo_seleccionado = await _resolver_modelo_solicitado(
+            modelo,
+            requiere_vision=requiere_vision,
+        )
+        modelo_visual = modelo_seleccionado
+        modelo_manual = bool((modelo or "").strip())
+
+        advertencias_preproceso: list[str] = []
+
+        # v4: no reenviar imágenes varias veces al LLM. Si no hay capa textual,
+        # se hace una lectura visual rápida una sola vez y el resto del flujo
+        # trabaja sobre ese texto consolidado. Esto evita que la detección de
+        # tipo y la extracción archivística hagan llamadas multimodales largas.
+        if doc.entrada.imagenes and not doc.entrada.texto:
+            _log_peticion(
+                "lectura_visual_previa_inicio",
+                peticion_id,
+                imagenes=len(doc.entrada.imagenes),
+                modelo=modelo_seleccionado,
+            )
+            lectura_visual = await extractor.lectura_visual_previa(
+                doc.entrada.imagenes,
+                modelo=modelo_seleccionado,
+            )
+            if lectura_visual:
+                doc.entrada = extractor.Entrada(texto=lectura_visual, imagenes=None)
+                if not modelo_manual:
+                    # Dos perfiles: visión para leer la imagen y texto para la extracción.
+                    # Esto recupera la agilidad del antiguo modelo PlumA especializado
+                    # sin depender de una única llamada multimodal pesada.
+                    modelo_seleccionado = await _resolver_modelo_solicitado(
+                        None,
+                        requiere_vision=False,
+                    )
+                advertencias_preproceso.append(
+                    "Documento visual procesado en modo rápido: PlumA realizó una lectura/transcripción "
+                    f"preliminar local de las imágenes con {modelo_visual} y generó la descripción "
+                    f"archivística con {modelo_seleccionado}. Revise visualmente los datos antes de usar la propuesta."
+                )
+                _log_peticion(
+                    "lectura_visual_previa_fin",
+                    peticion_id,
+                    caracteres=len(lectura_visual),
+                    imagenes_restantes=0,
+                    modelo_extraccion=modelo_seleccionado,
+                )
+            else:
+                advertencias_preproceso.append(
+                    "No se obtuvo lectura visual suficiente. Para evitar llamadas multimodales largas, "
+                    "PlumA puede devolver una propuesta incompleta; pruebe otro modelo visual u OCR local."
+                )
+                _log_peticion("lectura_visual_previa_sin_resultado", peticion_id)
+
+        elif doc.entrada.imagenes and doc.entrada.texto and not PLUMA_HIBRIDO_USAR_VISION:
+            # En PDFs híbridos el texto suele ser suficiente y muchísimo más rápido.
+            doc.entrada = extractor.Entrada(
+                texto=doc.entrada.texto,
+                imagenes=None,
+                plantilla=doc.entrada.plantilla,
+                instrucciones_tipo=doc.entrada.instrucciones_tipo,
+            )
+            advertencias_preproceso.append(
+                "Documento híbrido procesado en modo texto para acelerar el análisis local; "
+                "las imágenes no se reenviaron al modelo. Active PLUMA_HIBRIDO_USAR_VISION=true "
+                "solo si necesita análisis visual adicional."
+            )
+
+        requiere_vision_final = bool(doc.entrada.imagenes)
 
         _log_peticion(
             "documento_procesado",
@@ -346,6 +587,10 @@ async def describir(
             mime=doc.tipo_mime,
             ruta=doc.ruta,
             paginas=doc.paginas,
+            tamano=doc.tamano_bytes,
+            num_archivos=len(archivos_meta),
+            requiere_vision=requiere_vision_final,
+            modelo=modelo_seleccionado,
         )
 
         ruta_esquema = DIR_ESQUEMAS / NORMAS_DISPONIBLES[norma]["archivo"]
@@ -364,12 +609,20 @@ async def describir(
         if detectar_tipo:
             try:
                 catalogo = identificador_tipo.cargar_catalogo(RUTA_CATALOGO_TIPOS)
-                deteccion = await identificador_tipo.detectar(
-                    texto=doc.entrada.texto,
-                    imagenes=doc.entrada.imagenes,
-                    catalogo=catalogo,
-                    modelo=MODELO,
-                )
+                if doc.entrada.imagenes and not doc.entrada.texto:
+                    _log_peticion(
+                        "tipo_deteccion_omitida",
+                        peticion_id,
+                        motivo="solo_imagen_sin_lectura_visual",
+                    )
+                    deteccion = None
+                else:
+                    deteccion = await identificador_tipo.detectar(
+                        texto=doc.entrada.texto,
+                        imagenes=doc.entrada.imagenes,
+                        catalogo=catalogo,
+                        modelo=modelo_seleccionado,
+                    )
                 if deteccion:
                     _log_peticion(
                         "tipo_detectado",
@@ -393,10 +646,12 @@ async def describir(
             propuesta = await extractor.extraer(
                 entrada=doc.entrada,
                 esquema=esquema,
-                modelo=MODELO,
+                modelo=modelo_seleccionado,
                 filtro_claves=filtro_claves,
                 idioma_salida=idioma_salida,
             )
+            if advertencias_preproceso:
+                propuesta.advertencias = advertencias_preproceso + propuesta.advertencias
         except Exception as err:
             logger.exception("[%s] Error en extracción", peticion_id)
             raise HTTPException(500, "Error al generar la propuesta de descripción.") from err
@@ -406,6 +661,7 @@ async def describir(
             peticion_id,
             campos=len(propuesta.campos),
             advertencias=len(propuesta.advertencias),
+            segundos=round(time.monotonic() - _t_inicio, 1),
         )
 
     ficha_tecnica = auditoria.generar_ficha_tecnica(
@@ -414,7 +670,7 @@ async def describir(
         esquema=esquema,
         modo=modo,
         idioma_salida=idioma_salida,
-        modelo=MODELO,
+        modelo=modelo_seleccionado,
         filtro_claves=filtro_claves,
         propuesta=propuesta,
         deteccion=deteccion,
@@ -432,6 +688,8 @@ async def describir(
             "tamano_bytes": doc.tamano_bytes,
             "paginas": doc.paginas,
             "ruta_procesamiento": doc.ruta,
+            "num_archivos": len(archivos_meta),
+            "archivos": archivos_meta,
         },
         "tipo_detectado": (
             {

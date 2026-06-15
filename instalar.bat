@@ -2,7 +2,7 @@
 REM =============================================================================
 REM PlumA - instalador para Windows en modo local bloqueado
 REM -----------------------------------------------------------------------------
-REM A partir de v0.6 el instalador detecta si tienes Ollama nativo en el host
+REM En la arquitectura v0.7.0 el instalador detecta si tienes Ollama nativo en el host
 REM con el modelo base ya descargado. Si lo tiene, configura PlumA para usarlo
 REM via host.docker.internal:11434 y NO arranca el contenedor de Ollama. Si no,
 REM activa el perfil `bundled` de Docker Compose y levanta Ollama dentro de
@@ -119,7 +119,7 @@ goto wait_loop
 echo OK - Aplicacion lista
 goto open
 :wait_timeout
-echo AVISO - PlumA tarda mas de lo habitual. Puede estar descargando el modelo.
+echo AVISO - PlumA tarda mas de lo habitual. Puede estar esperando a Ollama.
 :open
 echo.
 echo [6/6] Abriendo PlumA...

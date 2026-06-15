@@ -2,14 +2,10 @@
 # =============================================================================
 # PlumA — instalador Linux/macOS en modo local bloqueado
 # -----------------------------------------------------------------------------
-# A partir de v0.6 el instalador detecta si tienes Ollama nativo en el host
-# con el modelo base ya descargado. Si lo tiene, configura PlumA para usarlo
-# vía host.docker.internal:11434 y NO arranca el contenedor de Ollama. Si no
-# lo tiene, activa el perfil `bundled` de Docker Compose y levanta Ollama
-# dentro de Docker como antes.
-#
-# Esto elimina la duplicación de modelos (4-5 GB) que ocurría en v0.5 cuando
-# el usuario ya tenía Ollama en el sistema.
+# PlumA usa el Ollama nativo/local del usuario. El instalador comprueba si
+# Ollama responde y si hay modelos ya descargados. Si existe gemma4:e2b, lo
+# marcará como preferido; si no, PlumA podrá elegir otro modelo descargado.
+# No se arranca Ollama dentro de Docker por defecto.
 #
 # NOTA (compatibilidad macOS): este instalador NO depende de `python3` en el
 # host. El saneo de `.env` y la detección del modelo en Ollama se hacen con
@@ -59,7 +55,7 @@ ok "Docker Compose disponible"
 # Reimplementado sin python3, solo con utilidades POSIX + bash.
 #
 # Variables que NO se pueden definir desde fuera: la release pública es
-# estrictamente local. MODELO_NOMBRE y MODELFILE_PATH son obsoletas desde v0.6
+# estrictamente local. MODELO_NOMBRE y MODELFILE_PATH son obsoletas desde la arquitectura v0.7.0
 # (ya no hay modelo derivado). PLUMA_OLLAMA_MODE y PLUMA_OLLAMA_URL las fija el
 # propio instalador según la detección del host.
 # -----------------------------------------------------------------------------
@@ -128,63 +124,57 @@ ok "Configuración saneada. No se permite endpoint remoto ni publicación en red
 # -----------------------------------------------------------------------------
 paso "Detectando Ollama nativo en el host"
 
-# Modelo base que se buscará. Se lee del .env recién saneado.
+# Modelo base que se buscará como preferido. Se lee del .env recién saneado.
 MODELO_BASE=$(grep '^MODELO_BASE=' .env | head -1 | cut -d= -f2- || true)
 [[ -z "$MODELO_BASE" ]] && MODELO_BASE="gemma4:e2b"
 
-# Comprueba en el JSON de /api/tags (recibido por stdin) si existe un modelo
-# cuyo "name" coincide exactamente con $1 o con "$1:latest". Sin python ni jq.
+extraer_modelos(){
+  grep -oE '"name"[[:space:]]*:[[:space:]]*"[^"]*"' \
+    | sed -E 's/^"name"[[:space:]]*:[[:space:]]*"(.*)"$/\1/' || true
+}
+
 modelo_presente(){
-  local buscar="$1"
-  local nombres="" n=""
-  # Extrae los valores de cada par "name":"..." y los deja uno por línea.
-  nombres="$(grep -oE '"name"[[:space:]]*:[[:space:]]*"[^"]*"' \
-             | sed -E 's/^"name"[[:space:]]*:[[:space:]]*"(.*)"$/\1/')" || true
+  local buscar="$1" n=""
   while IFS= read -r n; do
     [[ -z "$n" ]] && continue
     if [[ "$n" == "$buscar" || "$n" == "${buscar}:latest" ]]; then
       return 0
     fi
-  done <<< "$nombres"
+  done
   return 1
 }
 
-USAR_HOST_OLLAMA=false
-if command -v curl >/dev/null 2>&1 && curl -sfm 2 "http://localhost:11434/api/tags" >/dev/null 2>&1; then
-  TAGS_JSON="$(curl -sfm 2 "http://localhost:11434/api/tags" 2>/dev/null || true)"
-  if printf '%s' "$TAGS_JSON" | modelo_presente "$MODELO_BASE"; then
-    USAR_HOST_OLLAMA=true
-    ok "Ollama del host responde y tiene $MODELO_BASE — se evitará descarga duplicada"
+TAGS_JSON=""
+MODELOS_DESCARGADOS=""
+if command -v curl >/dev/null 2>&1 && curl -sfm 2 "http://127.0.0.1:11434/api/tags" >/dev/null 2>&1; then
+  TAGS_JSON="$(curl -sfm 2 "http://127.0.0.1:11434/api/tags" 2>/dev/null || true)"
+  MODELOS_DESCARGADOS="$(printf '%s' "$TAGS_JSON" | extraer_modelos)"
+  if [[ -n "$MODELOS_DESCARGADOS" ]]; then
+    if printf '%s\n' "$MODELOS_DESCARGADOS" | modelo_presente "$MODELO_BASE"; then
+      ok "Ollama del host responde y tiene $MODELO_BASE"
+    else
+      PRIMERO_MODELO="$(printf '%s\n' "$MODELOS_DESCARGADOS" | head -1)"
+      avisar "Ollama del host responde, pero no tiene $MODELO_BASE. PlumA usará otro modelo local disponible: $PRIMERO_MODELO"
+    fi
   else
-    avisar "Ollama del host responde pero NO tiene $MODELO_BASE — se usará Ollama dentro de Docker"
+    avisar "Ollama del host responde, pero no hay modelos descargados. Ejecute: ollama pull $MODELO_BASE"
   fi
 else
-  avisar "Ollama nativo no detectado en el host — se usará Ollama dentro de Docker"
+  avisar "Ollama nativo no responde en 127.0.0.1:11434. PlumA arrancará, pero mostrará error hasta que Ollama esté iniciado."
 fi
 
 # -----------------------------------------------------------------------------
-# Escribir el modo en .env y configurar profile de Compose
+# Escribir el modo en .env y configurar Compose sin Ollama dentro de Docker
 # -----------------------------------------------------------------------------
 paso "Configurando modo de Ollama"
-if [[ "$USAR_HOST_OLLAMA" == true ]]; then
-  {
-    echo ""
-    echo "# Modo elegido por el instalador en función de la detección del host"
-    echo "PLUMA_OLLAMA_MODE=host"
-    echo "PLUMA_OLLAMA_URL=http://host.docker.internal:11434"
-  } >> .env
-  export COMPOSE_PROFILES=""
-  ok "Modo: host (la app usará el Ollama nativo)"
-else
-  {
-    echo ""
-    echo "# Modo elegido por el instalador en función de la detección del host"
-    echo "PLUMA_OLLAMA_MODE=container"
-    echo "PLUMA_OLLAMA_URL=http://ollama:11434"
-  } >> .env
-  export COMPOSE_PROFILES="bundled"
-  ok "Modo: container (Ollama se levantará dentro de Docker)"
-fi
+{
+  echo ""
+  echo "# Modo elegido por el instalador: Ollama nativo/local del usuario"
+  echo "PLUMA_OLLAMA_MODE=host"
+  echo "PLUMA_OLLAMA_URL=http://host.docker.internal:11434"
+} >> .env
+export COMPOSE_PROFILES=""
+ok "Modo: host (la app usará el Ollama nativo/local; no se arranca Ollama en Docker)"
 
 # -----------------------------------------------------------------------------
 # Levantar servicios
@@ -210,28 +200,22 @@ for _ in {1..30}; do
   fi
   sleep 1
 done
-[[ "$listo" == true ]] && ok "Aplicación lista" || avisar "PlumA puede seguir arrancando o descargando el modelo."
+[[ "$listo" == true ]] && ok "Aplicación lista" || avisar "PlumA puede seguir arrancando o esperando a Ollama."
 
 URL="http://localhost:$PUERTO"
 echo ""
 echo "${VERDE}${NEG}Instalación completada en modo local bloqueado.${FIN}"
 echo "URL: ${NEG}$URL${FIN}"
-if [[ "$USAR_HOST_OLLAMA" == true ]]; then
-  echo "Ollama: usado desde el host (sin duplicación de modelos)"
-  echo ""
-  echo "${AMAR}AVISO de seguridad — Ollama nativo${FIN}"
-  echo "Comprueba que tu Ollama del host está escuchando SOLO en localhost."
-  echo "Por defecto, Ollama escucha en 0.0.0.0:11434, lo que significa que"
-  echo "cualquier dispositivo en tu red (oficina, wifi corporativa) puede"
-  echo "enviarle peticiones. Para limitarlo a tu equipo:"
-  echo "  Linux/macOS: export OLLAMA_HOST=127.0.0.1 antes de 'ollama serve'"
-  echo "             (o ajusta el servicio systemd; ver INSTALACION.md)"
-  echo "  Windows: ajusta la variable de entorno OLLAMA_HOST=127.0.0.1"
-  echo "           en las propiedades del sistema."
-  echo ""
-else
-  echo "Ollama: dentro de Docker (perfil bundled)"
-fi
+echo "Ollama: usado desde el host (sin duplicación de modelos)"
+echo ""
+echo "${AMAR}AVISO de seguridad — Ollama nativo${FIN}"
+echo "Comprueba que tu Ollama del host está escuchando SOLO en localhost."
+echo "Para limitarlo a tu equipo:"
+echo "  Linux/macOS: export OLLAMA_HOST=127.0.0.1 antes de 'ollama serve'"
+echo "             (o ajusta el servicio systemd; ver INSTALACION.md)"
+echo "  Windows: ajusta la variable de entorno OLLAMA_HOST=127.0.0.1"
+echo "           en las propiedades del sistema."
+echo ""
 echo ""
 if command -v xdg-open >/dev/null 2>&1; then
   xdg-open "$URL" >/dev/null 2>&1 &

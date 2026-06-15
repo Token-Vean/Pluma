@@ -42,11 +42,19 @@ cualquier otro).
 - **Detección de tipo documental**. El asistente reconoce oficios, actas,
   escrituras notariales, libros sacramentales, etc., y ajusta la
   extracción al tipo detectado.
-- **Multimodal**. Procesa PDF con texto, PDF escaneado y imágenes. Si el
-  OCR del PDF es de baja calidad, el asistente prefiere leer directamente
-  la imagen.
+- **OCR local previo a la IA**. Para PDF escaneado e imágenes, PlumA intenta
+  primero extraer texto con Tesseract dentro del contenedor local. Si el OCR
+  produce texto suficiente, la IA trabaja sobre texto, no sobre imagen, lo que
+  reduce mucho el tiempo de análisis. La visión multimodal queda como fallback.
 - **Agnóstico al sistema descriptivo**. La salida es estándar (JSON, CSV,
   EAD, EAC-CPF) y el archivero la lleva a su sistema como prefiera.
+
+
+### Tipo de entrada explícito
+
+Desde v0.7.0 la interfaz permite indicar si el documento subido debe tratarse como automático, PDF con OCR/capa textual, PDF escaneado/sin OCR, imagen o texto/DOCX. Esta pista no sustituye a la validación MIME real del backend, pero evita trabajo innecesario: por ejemplo, un PDF declarado como “PDF con OCR/texto” se procesa directamente desde su capa textual y no pasa por OCR ni visión multimodal.
+
+La detección de tipo documental con IA es opcional. Si se desactiva, PlumA evita una llamada preliminar al modelo y realiza directamente la extracción de campos según la norma seleccionada.
 
 ## Instalación
 
@@ -58,13 +66,10 @@ Una vez Docker esté instalado y arrancado:
 - **Windows**: doble clic en `instalar.bat`.
 - **Linux / macOS**: `chmod +x instalar.sh && ./instalar.sh`.
 
-El instalador detecta automáticamente si ya tienes Ollama funcionando
-en tu equipo:
-
-- Si **no** tienes Ollama, lo levanta dentro de Docker y descarga el
-  modelo por defecto (unos 4-5 GB la primera vez).
-- Si **ya** tienes Ollama con modelos descargados, la aplicación se
-  conecta directamente a él sin duplicar nada.
+El instalador configura PlumA para usar el **Ollama nativo/local del usuario**.
+Si tienes `gemma4:e2b` descargado, lo usará como preferido; si no, la interfaz
+permitirá elegir otro modelo ya descargado en Ollama. PlumA no descarga modelos
+dentro de Docker por defecto.
 
 Al terminar, abre el navegador en <http://127.0.0.1:8082>. El puerto es
 fijo por diseño en esta release (solo loopback IPv4).
@@ -76,8 +81,8 @@ Para eliminar todo: `desinstalar.sh` / `desinstalar.bat`.
 
 ## Uso rápido
 
-1. Arrastrar un documento a la zona de carga, o seleccionar uno de los
-   ejemplos incluidos.
+1. Arrastrar o seleccionar uno o varios archivos que formen el documento.
+   Antes de procesar, PlumA muestra una lista ordenable.
 2. Elegir la norma y el modo de extracción.
 3. Revisar las propuestas. Cada campo muestra el fragmento fuente y un
    indicador de confianza.
@@ -110,10 +115,7 @@ Para eliminar todo: `desinstalar.sh` / `desinstalar.bat`.
     ├── ejemplos/             documentos de prueba
     └── docker-compose.yml
 
-Desde 0.6.0-beta ya no existe `Modelfile` ni se crea un modelo derivado
-con `ollama create`: el system prompt y los parámetros de inferencia
-viven en `schemas/pluma-runtime.yaml` y se inyectan en cada llamada a
-Ollama desde el backend.
+Desde v0.7.0, PlumA usa una arquitectura **text-first / OCR-first**: si un PDF ya contiene capa textual suficiente, se procesa directamente como texto; si no, se intenta OCR local con Tesseract; y solo cuando esa vía no basta se usa visión multimodal como fallback. El `Modelfile` no es obligatorio para el funcionamiento normal: el system prompt y los parámetros de inferencia viven en `schemas/pluma-runtime.yaml` y se inyectan en cada llamada a Ollama desde el backend.
 
 ## Esquemas editables
 
@@ -240,6 +242,28 @@ Esta ficha mejora la trazabilidad técnica del proceso, pero no sustituye
 la revisión profesional del archivero ni una auditoría formal de
 seguridad.
 
+
+## Rendimiento con documentos visuales
+
+La versión 0.7.0 mantiene un modo visual rápido como fallback. PlumA ya no envía
+las imágenes repetidamente a todas las fases del flujo. Primero intenta usar
+texto embebido u OCR local. Solo si esa vía no ofrece texto suficiente realiza
+una lectura visual breve por imagen con un modelo de visión —preferentemente
+`qwen3.5:latest`— y después genera la descripción archivística sobre el texto
+consolidado, preferentemente con un modelo textual como `gemma4:e2b`.
+
+Para pruebas de rendimiento se conservan dos perfiles Ollama opcionales. No son necesarios para que PlumA funcione:
+
+```bash
+# Windows
+crear_modelos_pluma.bat
+
+# Linux/macOS
+./crear_modelos_pluma.sh
+```
+
+Estos scripts intentan crear `pluma-texto` desde `gemma4:e2b` y `pluma-vision` desde `qwen3.5:latest`, siempre que esos modelos base ya estén descargados en el Ollama local del usuario. Si fallan, basta con seleccionar directamente los modelos base desde la interfaz. No descargan modelos ni conectan con servicios externos.
+
 ## Documentación
 
 - [`INSTALACION.md`](INSTALACION.md) — instalación paso a paso (Windows, Linux, macOS).
@@ -252,7 +276,7 @@ seguridad.
 
 ## Estado del proyecto
 
-**Versión 0.6.0-beta — beta pública.** Esta versión está pensada para
+**Versión 0.7.0 — OCR-first y hardening.** Esta versión está pensada para
 evaluación por archiveros, formación, demostraciones y entornos de
 prueba controlados. **No es apta para producción** sin auditoría previa
 y sin las acciones que se describen en `SECURITY_HARDENING.md`

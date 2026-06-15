@@ -217,8 +217,8 @@ proporcionalidad (RGPD art. 5.1.c).
 
 ### Limitaciones conocidas del despliegue actual
 
-En el estado actual del proyecto (versión 0.5.0-beta, alpha), estas
-limitaciones se reconocen y se abordarán en versiones futuras:
+En el estado actual del proyecto (versión 0.7.0), estas
+limitaciones residuales se reconocen y se revisarán en versiones futuras:
 
 - **El contenedor de Ollama en perfil `bundled` corre como root**
   por la configuración por defecto de la imagen oficial
@@ -234,9 +234,9 @@ limitaciones se reconocen y se abordarán en versiones futuras:
   tamaño real del fichero documental.
 
 - **Los mitigantes contra ficheros-bomba son conservadores**: límites
-  de tamaño, páginas, píxeles, bytes renderizados y validación DOCX
-  contra ratios de compresión anómalos. Sigue pendiente aislar parsers
-  PDF/DOCX en procesos separados con timeout y límite de memoria por tarea.
+  de tamaño, páginas, píxeles, bytes renderizados, validación DOCX
+  contra ratios de compresión anómalos y parsers en proceso hijo con timeout
+  y límite de memoria cuando el entorno POSIX lo permite.
 
 - **La aplicación se entrega sin fijación de hashes criptográficos
   de las dependencias** (aunque sí con versiones exactas en

@@ -1,0 +1,14 @@
+FROM qwen3.5:latest
+
+# Perfil visual rápido para lectura previa de imágenes documentales.
+PARAMETER temperature 0.1
+PARAMETER top_p 0.9
+PARAMETER repeat_penalty 1.05
+PARAMETER num_ctx 4096
+PARAMETER num_predict 350
+
+SYSTEM """
+Eres PlumA Vision, un lector local de documentos de archivo en imagen.
+Lee solo lo visible. No inventes texto ni nombres. Marca lo dudoso como [ilegible].
+Produce lecturas breves para que otro modelo genere la descripción archivística.
+"""

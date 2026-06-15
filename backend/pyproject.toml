@@ -1,6 +1,6 @@
 [project]
 name = "pluma"
-version = "0.5.0-beta"
+version = "0.7.0"
 description = "Asistente de descripción archivística asistida por IA local"
 readme = "../README.md"
 requires-python = ">=3.11"

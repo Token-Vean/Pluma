@@ -263,6 +263,108 @@ main {
   margin-top: 2px;
 }
 
+.modelo-previo {
+  margin: 20px auto 0;
+  display: flex;
+  justify-content: center;
+}
+
+.modelo-previo .bloque-control {
+  background: var(--papel-claro);
+  border: 1px solid var(--filete-suave);
+  padding: 10px 12px;
+}
+
+.cola-archivos {
+  margin: 20px auto 0;
+  max-width: 620px;
+  background: var(--papel-claro);
+  border: 1px solid var(--filete);
+  padding: 14px;
+}
+
+.cola-archivos-cabecera {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: baseline;
+  margin-bottom: 10px;
+}
+
+.cola-archivos-titulo {
+  font-family: Georgia, 'Times New Roman', serif;
+  color: var(--tinta);
+}
+
+.cola-archivos-ayuda {
+  font-family: 'Consolas', 'Courier New', monospace;
+  font-size: 0.68rem;
+  color: var(--tinta-tenue);
+}
+
+.lista-archivos {
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.item-archivo {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--filete-suave);
+  background: #fffbf2;
+}
+
+.item-archivo-numero {
+  color: var(--tinta-tenue);
+  font-size: 0.72rem;
+}
+
+.item-archivo-datos { min-width: 0; }
+
+.item-archivo-nombre {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.88rem;
+}
+
+.item-archivo-meta {
+  color: var(--tinta-tenue);
+  font-size: 0.66rem;
+  margin-top: 2px;
+}
+
+.item-archivo-acciones {
+  display: flex;
+  gap: 4px;
+}
+
+.boton-mini {
+  min-width: 26px;
+  height: 26px;
+  border: 1px solid var(--filete);
+  background: var(--papel);
+  color: var(--tinta);
+  cursor: pointer;
+  font-size: 0.82rem;
+}
+
+.boton-mini:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.boton-mini-peligro { color: var(--lacre); }
+
+.cola-archivos-vacia .lista-archivos { display: none; }
+
 .privacidad-nota {
   margin-top: 32px;
   font-family: 'Consolas', 'Courier New', monospace;
@@ -396,6 +498,22 @@ main {
   min-width: 140px;
 }
 .selector-norma:focus { outline: none; border-color: var(--tinta); }
+
+.bloque-control-checkbox {
+  cursor: pointer;
+  user-select: none;
+}
+.bloque-control-checkbox input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--tinta);
+  cursor: pointer;
+}
+.etiqueta-control-checkbox {
+  color: var(--tinta-media);
+  text-transform: none;
+  letter-spacing: 0.03em;
+}
 
 .modos {
   display: flex;

@@ -9,7 +9,7 @@ except Exception:  # pragma: no cover
 
 ROOT = Path(__file__).resolve().parents[1]
 
-APP_VERSION = "0.6.0-beta"
+APP_VERSION = "0.7.0"
 
 
 def fail(msg: str) -> None:
@@ -37,14 +37,14 @@ def test_no_runtime_artifacts() -> None:
 
 
 def test_no_legacy_modelfile() -> None:
-    """v0.6: El Modelfile se sustituye por schemas/pluma-runtime.yaml.
+    """v0.7.0: El Modelfile se sustituye por schemas/pluma-runtime.yaml.
     Su presencia en el repo indica una migración incompleta."""
     if (ROOT / "Modelfile").exists():
-        fail("Modelfile aún presente en la raíz del repo; eliminado en v0.6")
+        fail("Modelfile aún presente en la raíz del repo; eliminado en la arquitectura v0.7.0")
     if (ROOT / "offline" / "models" / "Modelfile.template.parameters").exists():
-        fail("offline/models/Modelfile.template.parameters aún presente; eliminado en v0.6")
+        fail("offline/models/Modelfile.template.parameters aún presente; eliminado en la arquitectura v0.7.0")
     if not (ROOT / "schemas" / "pluma-runtime.yaml").exists():
-        fail("falta schemas/pluma-runtime.yaml (sustituto del Modelfile en v0.6)")
+        fail("falta schemas/pluma-runtime.yaml (sustituto del Modelfile en la arquitectura v0.7.0)")
     ok("Modelfile eliminado y pluma-runtime.yaml presente")
 
 
@@ -90,7 +90,7 @@ def test_compose_local_locked() -> None:
         fail("docker-compose.yml aún declara MODELO_NOMBRE o MODELFILE_PATH en environment")
     ollama = data["services"].get("ollama", {})
     if "bundled" not in (ollama.get("profiles") or []):
-        fail("el servicio ollama debe estar bajo profiles: [bundled] en v0.6")
+        fail("el servicio ollama debe estar bajo profiles: [bundled] en la arquitectura v0.7.0")
     volumes = ollama.get("volumes") or []
     if "./offline/models:/offline/models:ro" not in volumes:
         fail("ollama debe montar ./offline/models:/offline/models:ro")
@@ -108,7 +108,7 @@ def test_public_env_does_not_expose_dangerous_flags() -> None:
             fail(f".env.example expone opción peligrosa: {token}")
     for token in ("MODELO_NOMBRE=", "MODELFILE_PATH="):
         if any(line.startswith(token) for line in active_lines):
-            fail(f".env.example expone variable obsoleta v0.6: {token}")
+            fail(f".env.example expone variable obsoleta v0.7.0: {token}")
     # PERMITIR_APAGADO_UI ahora aparece comentado por defecto en .env.example,
     # lo cual equivale al valor por defecto del compose (`${PERMITIR_APAGADO_UI:-false}`).
     # Cualquier descomentado debe seguir siendo "false".

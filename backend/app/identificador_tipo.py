@@ -185,6 +185,8 @@ async def detectar(
         logger.warning("Fallo en detección de tipo: %s", e)
         return None
 
+    respuesta = llm.extraer_json_texto(respuesta)
+
     try:
         data = json.loads(respuesta)
     except json.JSONDecodeError:

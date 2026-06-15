@@ -1,7 +1,7 @@
 # Problemas conocidos y riesgos residuales
 
 Este documento recoge los problemas conocidos de PlumA en su versión
-**0.6.0-beta**. Está pensado para que cualquier persona que evalúe la
+**0.7.0**. Está pensado para que cualquier persona que evalúe la
 herramienta para un piloto, una auditoría, o un despliegue controlado,
 sepa de antemano qué limitaciones existen.
 
@@ -14,7 +14,7 @@ Este fichero describe únicamente el estado vigente. El histórico de
 problemas resueltos en versiones anteriores está en `CHANGELOG.md` y en
 las notas de cada release de GitHub.
 
-## Pendientes — esperados para la release candidate
+## Pendientes y riesgos residuales — v0.7.0
 
 ### Modelo de amenaza CSRF
 
@@ -60,7 +60,7 @@ sin que el usuario lo note.
 beta, fijar las imágenes por su digest SHA256:
 
 ```
-FROM python:3.12-slim@sha256:XXXXXXXXX...
+FROM python:3.12-slim-bookworm@sha256:XXXXXXXXX...
 image: ollama/ollama:0.21.2@sha256:YYYYYYYYY...
 ```
 
@@ -69,9 +69,7 @@ fijar versiones validadas en la release candidate.
 
 ### Falta de fuzzing y cobertura ampliada de tests
 
-Los tests actuales (`tests/`) son **30 tests** que pasan en CI (más 2
-saltados en entornos sin POSIX `resource.RLIMIT_AS`, esperado en Windows
-nativo y en algunos contenedores) y cubren los vectores de ataque más
+Los tests actuales (`tests/`) son **32 tests** que pasan en entorno local y cubren los vectores de ataque más
 obvios y la configuración de release:
 
 - Extensión falseada (binario llamado `.pdf`).
@@ -98,7 +96,7 @@ Para una release candidate harían falta:
 PlumA se ha desarrollado y probado primariamente en **Windows con
 Docker Desktop**. La compatibilidad con Linux y macOS está basada en que
 el código y la infraestructura (Docker, Python) son multiplataforma,
-pero **la beta es el primer momento en el que se abre a probar
+pero **v0.7.0 sigue siendo una fase de validación pública en el que se abre a probar
 activamente en estos sistemas**.
 
 Casos previsibles donde podría haber problemas:
@@ -115,7 +113,7 @@ Casos previsibles donde podría haber problemas:
   requiere capacidades concretas, se documentarán en
   `docker-compose.yml`.
 
-**Plan**: durante el ciclo beta se invitará a archiveros con los tres
+**Plan**: durante el ciclo v0.7.x se invitará a archiveros con los tres
 sistemas a un piloto cerrado, recoger feedback, ajustar.
 
 ### Apagado de Ollama en perfil bundled
@@ -213,7 +211,7 @@ con `OLLAMA_HOST=127.0.0.1`.
 ### Imagen oficial `ollama/ollama` no escaneada
 
 El workflow `.github/workflows/security-checks.yml` ejecuta Trivy sobre
-`pluma-app:0.6.0-beta` (la imagen que construimos). La imagen
+`pluma-app:0.7.0` (la imagen que construimos). La imagen
 `ollama/ollama:0.21.2` que se usa en el perfil bundled no se escanea: es
 upstream y no la construimos nosotros. Los CVEs de Ollama deben
 monitorizarse en sus releases. Mantener la versión fijada en

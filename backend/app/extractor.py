@@ -41,12 +41,22 @@ MAX_LONGITUD_EVIDENCIA = int(os.getenv("MAX_LONGITUD_EVIDENCIA_LLM", "4000"))
 MAX_ITEMS_LISTA = int(os.getenv("MAX_ITEMS_LISTA_LLM", "50"))
 MAX_LONGITUD_ITEM_LISTA = int(os.getenv("MAX_LONGITUD_ITEM_LISTA_LLM", "5000"))
 
-# Lectura visual previa para imágenes sin capa textual. Se usa el modelo base
-# multimodal, no el modelo especializado, para evitar que la plantilla JSON
-# vuelva al modelo demasiado conservador cuando debe leer texto visible.
+# Lectura visual previa para imágenes sin capa textual. En v4 se hace por
+# imagen, con prompt corto y límite de salida bajo, para evitar llamadas
+# multimodales enormes que hacen parecer que PlumA no responde.
 LECTURA_VISUAL_PREVIA = os.getenv("PLUMA_LECTURA_VISUAL_PREVIA", "true").strip().lower() in {"1", "true", "yes", "si", "sí", "on"}
 MODELO_LECTURA_VISUAL = os.getenv("MODELO_VISUAL_LECTURA") or os.getenv("MODELO_BASE", "gemma4:e2b")
 MAX_TRANSCRIPCION_VISUAL = int(os.getenv("MAX_TRANSCRIPCION_VISUAL", "12000"))
+MAX_IMAGENES_LECTURA_VISUAL = max(1, int(os.getenv("MAX_IMAGENES_LECTURA_VISUAL", "6")))
+
+# En modos amplios (por ejemplo ISAD(G) completo) una única respuesta JSON
+# con muchos campos aumenta mucho la probabilidad de que modelos locales
+# devuelvan JSON incompleto o mal formado. Por defecto PlumA divide la
+# extracción por áreas de la norma cuando se solicitan muchos campos y fusiona
+# después los resultados. Esto evita el fallo all-or-nothing de "0 de 26"
+# campos por un único JSON inválido.
+EXTRACCION_POR_AREAS = os.getenv("PLUMA_EXTRACCION_POR_AREAS", "true").strip().lower() in {"1", "true", "yes", "si", "sí", "on"}
+EXTRACCION_POR_AREAS_MIN_CAMPOS = max(2, int(os.getenv("PLUMA_EXTRACCION_POR_AREAS_MIN_CAMPOS", "12")))
 
 IDIOMAS_SALIDA = {
     "es": "español",
@@ -358,19 +368,12 @@ Devuelve un JSON con esta forma exacta (rellenando los valores):
 
 
 _PROMPT_LECTURA_VISUAL = """\
-Analiza la imagen adjunta como documento de archivo.
+Analiza UNA imagen de un documento de archivo.
 
-Objetivo: producir una lectura preliminar estrictamente basada en texto visible.
-
-Reglas:
-- Transcribe únicamente texto que puedas leer en la imagen.
-- No inventes, no completes palabras dudosas y no normalices nombres propios.
-- Si una palabra o fecha no es legible, escribe [ilegible].
-- Si la imagen no contiene texto suficiente, responde exactamente: SIN_TEXTO_LEGIBLE.
-- No describas estilos, no expliques el proceso y no añadas markdown.
-- Puedes incluir líneas como: Título visible, Fecha visible, Emisor visible, Destinatario visible, Asunto visible, Fragmentos legibles.
-
-Devuelve solo la lectura/transcripción visible de la imagen.
+Devuelve una lectura breve, útil para descripción archivística. Máximo 120 palabras.
+Incluye solo lo visible: tipo probable, membrete/encabezado, fecha, emisor, destinatario, asunto y primeras líneas legibles.
+No expliques el proceso. No uses markdown. No inventes. Marca lo dudoso como [ilegible].
+Si no hay texto suficiente, responde exactamente: SIN_TEXTO_LEGIBLE.
 """
 
 
@@ -391,26 +394,54 @@ def _limpiar_transcripcion_visual(texto: str | None) -> str | None:
 
 
 async def lectura_visual_previa(imagenes: list[bytes] | None, modelo: str | None = None) -> str | None:
-    """Obtiene una transcripción visual preliminar para imágenes sin OCR.
+    """Obtiene una lectura visual preliminar rápida.
 
-    No usa el modelo especializado de PlumA salvo que se fuerce por variable de
-    entorno. La extracción ISAD(G) posterior sigue usando el modelo especializado.
+    La v3 enviaba todas las imágenes a una única llamada multimodal, lo que en
+    equipos locales podía tardar muchos minutos. La v4 procesa cada imagen una
+    sola vez, con prompt corto y salida acotada, y consolida el texto resultante.
     """
     if not LECTURA_VISUAL_PREVIA or not imagenes:
         return None
+
     modelo_lectura = modelo or MODELO_LECTURA_VISUAL
-    try:
-        respuesta = await llm.generar(
-            prompt=_PROMPT_LECTURA_VISUAL,
-            modelo=modelo_lectura,
-            imagenes=imagenes,
-            formato_json=False,
-            temperatura=0.0,
+    seleccionadas = imagenes[:MAX_IMAGENES_LECTURA_VISUAL]
+    lecturas: list[str] = []
+
+    for indice, imagen in enumerate(seleccionadas, start=1):
+        prompt = (
+            f"{_PROMPT_LECTURA_VISUAL}\n"
+            f"Imagen {indice} de {len(imagenes)}. "
+            "Mantén la respuesta breve y basada solo en la imagen actual."
         )
-    except Exception as e:
-        logger.warning("Fallo en lectura visual previa con %s: %s", modelo_lectura, e)
+        try:
+            respuesta = await llm.generar(
+                prompt=prompt,
+                modelo=modelo_lectura,
+                imagenes=[imagen],
+                formato_json=False,
+                temperatura=0.1,
+            )
+        except Exception as e:
+            logger.warning("Fallo en lectura visual previa imagen %d con %s: %s", indice, modelo_lectura, e)
+            continue
+
+        limpio = _limpiar_transcripcion_visual(respuesta)
+        if limpio:
+            lecturas.append(f"[Imagen {indice}]\n{limpio}")
+
+    if len(imagenes) > len(seleccionadas):
+        lecturas.append(
+            f"[Aviso técnico] Solo se realizó lectura visual previa de "
+            f"{len(seleccionadas)} de {len(imagenes)} imágenes para mantener "
+            "el procesamiento local dentro de tiempos razonables."
+        )
+
+    consolidado = "\n\n".join(lecturas).strip()
+    if not consolidado:
         return None
-    return _limpiar_transcripcion_visual(respuesta)
+    if len(consolidado) > MAX_TRANSCRIPCION_VISUAL:
+        consolidado = consolidado[:MAX_TRANSCRIPCION_VISUAL].rstrip()
+    return consolidado
 
 
 # =============================================================================
@@ -424,6 +455,8 @@ def parsear_respuesta(
 ) -> tuple[list[CampoPropuesto], list[str]]:
     """Parsea el JSON del LLM y valida cada campo contra el esquema."""
     advertencias: list[str] = []
+
+    json_str = llm.extraer_json_texto(json_str)
 
     try:
         data = json.loads(json_str)
@@ -480,6 +513,148 @@ def parsear_respuesta(
         ))
 
     return propuestos, advertencias
+
+
+def _hay_advertencia_json_invalido(advertencias: list[str]) -> bool:
+    texto = "\n".join(advertencias).lower()
+    return "json inválido" in texto or "json invalido" in texto or "no devolvió un objeto json" in texto
+
+
+def _grupos_claves_por_area(esquema: Esquema, filtro_claves: set[str] | None = None) -> list[tuple[str, set[str]]]:
+    """Agrupa claves extraíbles por área preservando el orden de la norma."""
+    grupos: list[tuple[str, list[str]]] = []
+    indice_por_area: dict[str, int] = {}
+
+    for el in esquema.extraibles(filtro_claves):
+        area = el.area_nombre or el.area_id or "Campos sin área"
+        if area not in indice_por_area:
+            indice_por_area[area] = len(grupos)
+            grupos.append((area, []))
+        grupos[indice_por_area[area]][1].append(el.clave)
+
+    return [(area, set(claves)) for area, claves in grupos if claves]
+
+
+async def _llamar_modelo_extraccion(
+    *,
+    entrada: Entrada,
+    esquema: Esquema,
+    modelo: str,
+    filtro_claves: set[str] | None,
+    idioma_salida: str,
+) -> tuple[str, str]:
+    """Construye prompt y llama al modelo para un bloque de campos."""
+    prompt = construir_prompt(esquema, entrada, filtro_claves, idioma_salida)
+    respuesta = await llm.generar(
+        prompt=prompt,
+        modelo=modelo,
+        imagenes=entrada.imagenes,
+        formato_json=True,
+    )
+    return prompt, respuesta
+
+
+async def _extraer_bloque_campos(
+    *,
+    entrada: Entrada,
+    esquema: Esquema,
+    modelo: str,
+    filtro_claves: set[str] | None,
+    idioma_salida: str,
+    etiqueta: str,
+) -> tuple[list[CampoPropuesto], list[str]]:
+    """Extrae un bloque de campos y reintenta una vez si el JSON es inválido."""
+    try:
+        _, respuesta = await _llamar_modelo_extraccion(
+            entrada=entrada,
+            esquema=esquema,
+            modelo=modelo,
+            filtro_claves=filtro_claves,
+            idioma_salida=idioma_salida,
+        )
+    except Exception as e:
+        logger.exception("Fallo en la llamada al modelo para bloque %s", etiqueta)
+        return [], [f"{etiqueta}: el modelo no respondió: {e}"]
+
+    propuestos, advertencias = parsear_respuesta(respuesta, esquema, filtro_claves)
+    if not _hay_advertencia_json_invalido(advertencias):
+        return propuestos, advertencias
+
+    logger.warning("JSON inválido en bloque %s; reintentando una vez con prompt reforzado", etiqueta)
+    try:
+        prompt_base = construir_prompt(esquema, entrada, filtro_claves, idioma_salida)
+        prompt_reintento = (
+            prompt_base.rstrip()
+            + "\n\nREINTENTO POR JSON INVÁLIDO:\n"
+            + "En el intento anterior la salida no pudo parsearse como JSON. "
+            + "Devuelve ahora SOLO el objeto JSON solicitado, sin markdown, sin texto previo, "
+            + "sin comentarios y sin claves adicionales. No expliques nada."
+        )
+        respuesta = await llm.generar(
+            prompt=prompt_reintento,
+            modelo=modelo,
+            imagenes=entrada.imagenes,
+            formato_json=True,
+        )
+        propuestos2, advertencias2 = parsear_respuesta(respuesta, esquema, filtro_claves)
+        if not _hay_advertencia_json_invalido(advertencias2):
+            advertencias2.insert(0, f"{etiqueta}: se recuperó la extracción tras reintentar por JSON inválido.")
+            return propuestos2, advertencias2
+        advertencias2.insert(0, f"{etiqueta}: el modelo volvió a devolver JSON inválido tras un reintento.")
+        return propuestos2, advertencias2
+    except Exception as e:
+        logger.exception("Fallo en reintento de bloque %s", etiqueta)
+        advertencias.append(f"{etiqueta}: reintento fallido tras JSON inválido: {e}")
+        return propuestos, advertencias
+
+
+async def _extraer_por_areas(
+    *,
+    entrada: Entrada,
+    esquema: Esquema,
+    modelo: str,
+    filtro_claves: set[str] | None,
+    idioma_salida: str,
+) -> tuple[list[CampoPropuesto], list[str]]:
+    """Extrae campos por áreas de la norma para evitar respuestas JSON enormes."""
+    grupos = _grupos_claves_por_area(esquema, filtro_claves)
+    todos: list[CampoPropuesto] = []
+    advertencias: list[str] = []
+    vistos: set[str] = set()
+
+    for etiqueta, claves in grupos:
+        logger.info("Extracción por áreas: bloque '%s' con %d campos", etiqueta, len(claves))
+        propuestos, adv = await _extraer_bloque_campos(
+            entrada=entrada,
+            esquema=esquema,
+            modelo=modelo,
+            filtro_claves=claves,
+            idioma_salida=idioma_salida,
+            etiqueta=etiqueta,
+        )
+        advertencias.extend(adv)
+        for campo in propuestos:
+            if campo.clave in vistos:
+                continue
+            vistos.add(campo.clave)
+            todos.append(campo)
+
+    for el in esquema.extraibles(filtro_claves):
+        if el.clave not in vistos:
+            todos.append(CampoPropuesto(
+                id=el.id, clave=el.clave, nombre=el.nombre, valor=None,
+                confianza=None, evidencia=None, span=None, extraible=el.extraible,
+                estado_evidencia="sin_valor", obligatorio=el.obligatorio,
+                area_id=el.area_id, area_nombre=el.area_nombre,
+            ))
+            vistos.add(el.clave)
+
+    orden = {el.clave: i for i, el in enumerate(esquema.elementos)}
+    todos.sort(key=lambda c: orden.get(c.clave, 9999))
+
+    if grupos:
+        advertencias.insert(0, f"Modo completo procesado por áreas ({len(grupos)} bloques) para evitar JSON demasiado largo en modelos locales.")
+    return todos, advertencias
 
 
 def _validar_valor(valor: Any, el: ElementoEsquema) -> tuple[Any, str | None]:
@@ -680,26 +855,71 @@ def localizar_spans(campos: list[CampoPropuesto], texto: str | None) -> list[Cam
     return campos
 
 
+def _normalizar_cotejo(s: str) -> str:
+    """Normaliza para un cotejo tolerante al ruido tipográfico del OCR:
+    une palabras partidas por guion de fin de línea ("espa- ñoles" ->
+    "españoles"), colapsa espacios y pasa a minúsculas. No altera el texto
+    almacenado; solo se usa para localizar la evidencia."""
+    s = re.sub(r"-\s+", "", s)
+    s = re.sub(r"\s+", " ", s).strip().lower()
+    return s
+
+
+def _sin_diacriticos(s: str) -> str:
+    """Elimina diacríticos para tolerar acentos que el OCR suele perder
+    (p. ej. 'Republica' por 'República'). Último recurso del cotejo."""
+    return "".join(
+        c for c in unicodedata.normalize("NFKD", s) if not unicodedata.combining(c)
+    )
+
+
+def _trozos_evidencia(fragmento: str) -> list[str]:
+    """El modelo a veces une pasajes no contiguos con '...' o '…'. Devuelve
+    el fragmento completo y, si hay elipsis, también sus trozos (de mayor a
+    menor longitud) para poder localizar al menos uno de ellos."""
+    candidatos = [fragmento]
+    trozos = [p.strip() for p in re.split(r"\.{3,}|…", fragmento) if p.strip()]
+    if len(trozos) > 1:
+        candidatos.extend(sorted(trozos, key=len, reverse=True))
+    return candidatos
+
+
 def _buscar_span(fragmento: str, texto: str) -> tuple[int, int] | None:
     if not fragmento.strip():
         return None
 
+    # 1. Coincidencia exacta: lo más fiable.
     pos = texto.find(fragmento)
     if pos >= 0:
         return (pos, pos + len(fragmento))
 
-    norm = re.sub(r"\s+", " ", fragmento.strip()).lower()
-    texto_norm = re.sub(r"\s+", " ", texto).lower()
-    pos = texto_norm.find(norm)
-    if pos >= 0:
-        return (pos, pos + len(norm))
+    # 2-4. Cotejo tolerante al ruido del OCR (guiones de partición, espacios,
+    # mayúsculas y, como último recurso, acentos perdidos). No se relaja la
+    # exigencia de que la cita exista en el documento: solo se ignora el ruido
+    # tipográfico. Se descartan fragmentos demasiado cortos para evitar
+    # coincidencias triviales.
+    texto_norm = _normalizar_cotejo(texto)
+    texto_norm_sd = _sin_diacriticos(texto_norm)
 
+    for candidato in _trozos_evidencia(fragmento):
+        norm = _normalizar_cotejo(candidato)
+        if len(norm) < 12:
+            continue
+        pos = texto_norm.find(norm)
+        if pos >= 0:
+            return (pos, pos + len(norm))
+        pos = texto_norm_sd.find(_sin_diacriticos(norm))
+        if pos >= 0:
+            return (pos, pos + len(norm))
+
+    # 5. Último recurso: las primeras palabras del fragmento.
     palabras = fragmento.split()
     if len(palabras) >= 5:
-        snippet = " ".join(palabras[:5])
-        pos = texto.find(snippet)
-        if pos >= 0:
-            return (pos, pos + len(snippet))
+        snippet = _normalizar_cotejo(" ".join(palabras[:6]))
+        if len(snippet) >= 12:
+            pos = texto_norm_sd.find(_sin_diacriticos(snippet))
+            if pos >= 0:
+                return (pos, pos + len(snippet))
 
     return None
 
@@ -766,7 +986,7 @@ async def extraer(
     # visual libre con el modelo base y después se usa esa transcripción como
     # contexto de extracción estructurada.
     if entrada.imagenes and not entrada.texto:
-        transcripcion_visual = await lectura_visual_previa(entrada.imagenes)
+        transcripcion_visual = await lectura_visual_previa(entrada.imagenes, modelo=modelo)
         if transcripcion_visual:
             entrada_trabajo = Entrada(
                 texto=transcripcion_visual,
@@ -776,9 +996,9 @@ async def extraer(
             )
             texto_control_contaminacion = transcripcion_visual
             advertencias_modelo.append(
-                "Documento de imagen procesado con lectura visual previa: la extracción "
-                "estructurada se ha basado en una transcripción preliminar generada localmente "
-                "por el modelo base. Las evidencias deben revisarse visualmente."
+                "Documento de imagen procesado con lectura visual previa rápida: la extracción "
+                "estructurada se ha basado en una lectura/transcripción preliminar generada localmente "
+                "una sola vez por imagen. Las evidencias deben revisarse visualmente."
             )
         else:
             advertencias_modelo.append(
@@ -786,52 +1006,75 @@ async def extraer(
                 "PlumA intentará la extracción directa por visión."
             )
 
-    prompt = construir_prompt(esquema, entrada_trabajo, filtro_claves, idioma_salida)
+    extraibles = esquema.extraibles(filtro_claves)
+    usar_extraccion_por_areas = (
+        EXTRACCION_POR_AREAS
+        and entrada_trabajo.texto
+        and not entrada_trabajo.imagenes
+        and filtro_claves is None
+        and len(extraibles) >= EXTRACCION_POR_AREAS_MIN_CAMPOS
+    )
 
     logger.info(
-        "Llamando al modelo %s para %s (%d campos extraíbles%s)",
+        "Llamando al modelo %s para %s (%d campos extraíbles%s%s)",
         modelo, esquema.norma,
-        len(esquema.extraibles(filtro_claves)),
+        len(extraibles),
         f"; filtro: {len(filtro_claves)}" if filtro_claves else "",
+        "; por áreas" if usar_extraccion_por_areas else "",
     )
-    try:
-        try:
-            respuesta = await llm.generar(
-                prompt=prompt,
-                modelo=modelo,
-                imagenes=entrada_trabajo.imagenes,
-                formato_json=True,
-            )
-        except Exception as e:
-            if entrada_trabajo.texto and entrada_trabajo.imagenes:
-                logger.warning(
-                    "Fallo en llamada multimodal; reintentando solo con texto: %s", e
-                )
-                advertencias_modelo.append(
-                    "La llamada visual/híbrida ha fallado en Ollama; PlumA ha reintentado "
-                    "el análisis usando la capa textual extraída para no perder el proceso."
-                )
-                respuesta = await llm.generar(
-                    prompt=prompt,
-                    modelo=modelo,
-                    imagenes=None,
-                    formato_json=True,
-                )
-            else:
-                raise
-    except Exception as e:
-        logger.exception("Fallo en la llamada al modelo")
-        propuestos = aplicar_defaults(esquema, [])
-        return Propuesta(
-            norma=esquema.norma,
-            campos=propuestos,
-            modelo=modelo,
-            timestamp=dt.datetime.now().isoformat(timespec="seconds"),
-            idioma_salida=idioma_salida,
-            advertencias=[f"El modelo no respondió: {e}"],
-        )
 
-    propuestos, advertencias = parsear_respuesta(respuesta, esquema, filtro_claves)
+    if usar_extraccion_por_areas:
+        propuestos, advertencias = await _extraer_por_areas(
+            entrada=entrada_trabajo,
+            esquema=esquema,
+            modelo=modelo,
+            filtro_claves=filtro_claves,
+            idioma_salida=idioma_salida,
+        )
+    else:
+        try:
+            try:
+                _, respuesta = await _llamar_modelo_extraccion(
+                    entrada=entrada_trabajo,
+                    esquema=esquema,
+                    modelo=modelo,
+                    filtro_claves=filtro_claves,
+                    idioma_salida=idioma_salida,
+                )
+            except Exception as e:
+                if entrada_trabajo.texto and entrada_trabajo.imagenes:
+                    logger.warning("Fallo en llamada multimodal; reintentando solo con texto: %s", e)
+                    advertencias_modelo.append(
+                        "La llamada visual/híbrida ha fallado en Ollama; PlumA ha reintentado "
+                        "el análisis usando la capa textual extraída para no perder el proceso."
+                    )
+                    entrada_solo_texto = Entrada(
+                        texto=entrada_trabajo.texto, imagenes=None, plantilla=entrada_trabajo.plantilla,
+                        instrucciones_tipo=entrada_trabajo.instrucciones_tipo,
+                    )
+                    _, respuesta = await _llamar_modelo_extraccion(
+                        entrada=entrada_solo_texto, esquema=esquema, modelo=modelo,
+                        filtro_claves=filtro_claves, idioma_salida=idioma_salida,
+                    )
+                else:
+                    raise
+        except Exception as e:
+            logger.exception("Fallo en la llamada al modelo")
+            propuestos = aplicar_defaults(esquema, [])
+            return Propuesta(
+                norma=esquema.norma, campos=propuestos, modelo=modelo,
+                timestamp=dt.datetime.now().isoformat(timespec="seconds"),
+                idioma_salida=idioma_salida, advertencias=[f"El modelo no respondió: {e}"],
+            )
+
+        propuestos, advertencias = parsear_respuesta(respuesta, esquema, filtro_claves)
+        if _hay_advertencia_json_invalido(advertencias) and filtro_claves is None and len(extraibles) >= EXTRACCION_POR_AREAS_MIN_CAMPOS:
+            logger.warning("Extracción monolítica devolvió JSON inválido; reintentando por áreas")
+            propuestos, advertencias = await _extraer_por_areas(
+                entrada=entrada_trabajo, esquema=esquema, modelo=modelo,
+                filtro_claves=filtro_claves, idioma_salida=idioma_salida,
+            )
+
     advertencias = advertencias_modelo + advertencias
     propuestos = controlar_contaminacion_ejemplo(propuestos, texto_control_contaminacion, advertencias)
     propuestos = localizar_spans(propuestos, texto_verificable)

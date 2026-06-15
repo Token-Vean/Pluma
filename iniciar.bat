@@ -45,7 +45,13 @@ if /I "!MODO!"=="host" (
     set "COMPOSE_PROFILES=bundled"
     echo Modo: container ^(se levantara el Ollama de Docker^)
 )
-docker compose up -d
+docker image inspect pluma-app:0.7.0 >nul 2>&1
+if errorlevel 1 (
+    echo Imagen de PlumA no encontrada. Construyendo por primera vez ^(puede tardar^)...
+    docker compose up -d --build
+) else (
+    docker compose up -d
+)
 if errorlevel 1 (
     echo ERROR: No se pudieron arrancar los servicios.
     echo Si es la primera vez, ejecuta instalar.bat en su lugar.

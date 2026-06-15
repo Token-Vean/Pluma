@@ -4,7 +4,7 @@ REM pluma-install-core.bat
 REM -----------------------------------------------------------------------------
 REM Variante del instalador para distribución offline con imagen pluma-app
 REM precargada. Se basa en el modo (host/container) elegido por el PS1 de
-REM detección. A partir de v0.6 ya no hay flujo de importación de modelo
+REM detección. En la arquitectura v0.7.0 ya no hay flujo de importación de modelo
 REM derivado: el system prompt vive en schemas/pluma-runtime.yaml.
 REM =============================================================================
 setlocal EnableExtensions EnableDelayedExpansion
@@ -57,9 +57,9 @@ if errorlevel 1 (
 )
 
 if /I "%PLUMA_OLLAMA_MODE%"=="host" (
-  echo Ollama local del usuario detectado. No se descarga el modelo dentro del contenedor.
+  echo Ollama local del usuario configurado. No se descarga ni arranca el modelo dentro de Docker.
 ) else (
-  echo Modo container. Si falta el modelo base, la app lo descargara via Ollama Docker.
+  echo Modo container solicitado explicitamente.
 )
 
 echo Esperando a que el servicio web de PlumA este listo...

@@ -21,6 +21,9 @@ import io
 import logging
 import os
 import re
+import shutil
+import subprocess
+import tempfile
 import warnings
 import zipfile
 from dataclasses import dataclass
@@ -42,6 +45,39 @@ PAGINAS_PDF_HIBRIDO = 5
 PAGINAS_PDF_VISION_MAX = 20
 PDF_HIBRIDO_CON_IMAGENES = os.getenv("PLUMA_PDF_HIBRIDO_CON_IMAGENES", "false").strip().lower() in {"1", "true", "yes", "si", "sí", "on"}
 LONGITUD_MAXIMA_TEXTO = int(os.getenv("MAX_LONGITUD_TEXTO_EXTRAIDO", "800000"))
+
+# OCR local. Se ejecuta dentro del contenedor de aplicación, sin servicios
+# externos. Tesseract se invoca por CLI para evitar añadir wrappers Python y
+# mantener reducida la superficie de dependencias. Si no hay texto suficiente,
+# PlumA conserva la ruta visual como fallback.
+PLUMA_OCR_LOCAL = os.getenv("PLUMA_OCR_LOCAL", "true").strip().lower() in {"1", "true", "yes", "si", "sí", "on"}
+def _ocr_lang_valido(valor: str | None) -> str:
+    """Idiomas de Tesseract: códigos de 3 letras unidos por '+' (p. ej.
+    'spa+eng'). Es configuración de operador; ante un formato inválido se
+    vuelve al valor por defecto seguro en lugar de pasar a tesseract una
+    cadena arbitraria."""
+    candidato = (valor or "").strip()
+    if re.fullmatch(r"[a-z]{3}(\+[a-z]{3})*", candidato):
+        return candidato
+    logger.warning("PLUMA_OCR_LANG inválido (%r); se usa 'spa+eng'.", valor)
+    return "spa+eng"
+
+
+def _ocr_psm_valido(valor: str | None) -> str:
+    """Page segmentation mode de Tesseract: entero 0-13."""
+    candidato = (valor or "").strip()
+    if re.fullmatch(r"\d{1,2}", candidato) and 0 <= int(candidato) <= 13:
+        return candidato
+    logger.warning("PLUMA_OCR_PSM inválido (%r); se usa '6'.", valor)
+    return "6"
+
+
+OCR_LANG = _ocr_lang_valido(os.getenv("PLUMA_OCR_LANG", "spa+eng"))
+OCR_PSM = _ocr_psm_valido(os.getenv("PLUMA_OCR_PSM", "6"))
+OCR_TIMEOUT_SEGUNDOS = max(5, int(os.getenv("PLUMA_OCR_TIMEOUT_SEGUNDOS", "60")))
+OCR_MAX_IMAGENES = max(1, int(os.getenv("PLUMA_OCR_MAX_IMAGENES", "20")))
+OCR_MIN_CARACTERES = max(20, int(os.getenv("PLUMA_OCR_MIN_CARACTERES", "80")))
+OCR_MIN_ALFANUM_RATIO = float(os.getenv("PLUMA_OCR_MIN_ALFANUM_RATIO", "0.35"))
 
 # Imagen de entrada. 40 MP evita bombas razonables sin impedir escaneos
 # administrativos grandes. La dimensión máxima reduce cargas patológicas.
@@ -74,6 +110,36 @@ TIPOS_ADMITIDOS = {
 }
 
 Ruta = Literal["texto", "vision", "hibrida"]
+PreferenciaEntrada = Literal["auto", "pdf_texto", "pdf_escaneado", "imagen", "texto"]
+
+PREFERENCIAS_ENTRADA_VALIDAS = {"auto", "pdf_texto", "pdf_escaneado", "imagen", "texto"}
+
+def normalizar_preferencia_entrada(valor: str | None) -> PreferenciaEntrada:
+    """Normaliza la pista de entrada indicada por la interfaz.
+
+    Esta pista no sustituye a la validación MIME real; solo evita rutas
+    costosas cuando el usuario ya sabe si el PDF tiene texto/OCR o si debe
+    tratarse como imagen/escaneo.
+    """
+    candidato = (valor or "auto").strip().lower().replace("-", "_")
+    alias = {
+        "automatico": "auto",
+        "automático": "auto",
+        "pdf_ocr": "pdf_texto",
+        "pdf_textual": "pdf_texto",
+        "pdf_con_ocr": "pdf_texto",
+        "pdf_sin_ocr": "pdf_escaneado",
+        "pdf_scan": "pdf_escaneado",
+        "scan": "pdf_escaneado",
+        "escaneo": "pdf_escaneado",
+        "image": "imagen",
+        "texto_docx": "texto",
+    }
+    candidato = alias.get(candidato, candidato)
+    if candidato not in PREFERENCIAS_ENTRADA_VALIDAS:
+        raise ErrorValidacion(f"Preferencia de entrada no admitida: {valor}")
+    return candidato  # type: ignore[return-value]
+
 
 
 # =============================================================================
@@ -407,6 +473,112 @@ def _pdf_a_imagenes(contenido: bytes, max_paginas: int = PAGINAS_PDF_VISION_MAX)
     return imagenes
 
 
+# =============================================================================
+# OCR local con Tesseract
+# =============================================================================
+
+def _tesseract_disponible() -> bool:
+    """Comprueba si el binario de Tesseract está disponible en PATH."""
+    return shutil.which("tesseract") is not None
+
+
+def _texto_ocr_suficiente(texto: str | None) -> bool:
+    """Heurística conservadora para decidir si el OCR evita la ruta visual."""
+    if not texto:
+        return False
+    limpio = re.sub(r"\s+", " ", texto).strip()
+    if len(limpio) < OCR_MIN_CARACTERES:
+        return False
+    alfanum = sum(1 for c in limpio if c.isalnum())
+    ratio = alfanum / max(1, len(limpio))
+    if ratio < OCR_MIN_ALFANUM_RATIO:
+        return False
+    palabras = [p for p in re.split(r"\s+", limpio) if len(p) >= 3 and any(c.isalpha() for c in p)]
+    return len(palabras) >= 8
+
+
+def _ocr_imagen_tesseract(imagen: bytes, *, indice: int | None = None) -> str:
+    """Ejecuta OCR local sobre una imagen ya validada/renderizada."""
+    if not PLUMA_OCR_LOCAL:
+        return ""
+    if not _tesseract_disponible():
+        logger.info("OCR local omitido: tesseract no está disponible en PATH")
+        return ""
+
+    # Tesseract trabaja mejor con ficheros temporales que con stdin cuando hay
+    # formatos variados. No usamos shell y el directorio temporal vive en tmpfs
+    # del contenedor.
+    tmp_path: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(prefix="pluma_ocr_", suffix=".png", delete=False) as tmp:
+            tmp.write(imagen)
+            tmp_path = tmp.name
+
+        cmd = [
+            "tesseract",
+            tmp_path,
+            "stdout",
+            "-l",
+            OCR_LANG,
+            "--psm",
+            OCR_PSM,
+        ]
+        proc = subprocess.run(
+            cmd,
+            check=False,
+            capture_output=True,
+            timeout=OCR_TIMEOUT_SEGUNDOS,
+        )
+        if proc.returncode != 0:
+            detalle = (proc.stderr or b"").decode("utf-8", errors="replace").strip()
+            logger.info(
+                "OCR local sin resultado%s: tesseract rc=%s %s",
+                f" imagen={indice}" if indice is not None else "",
+                proc.returncode,
+                detalle[:300],
+            )
+            return ""
+        return (proc.stdout or b"").decode("utf-8", errors="replace").strip()
+    except subprocess.TimeoutExpired:
+        logger.info("OCR local cancelado por timeout%s", f" imagen={indice}" if indice is not None else "")
+        return ""
+    except Exception as exc:
+        logger.info("OCR local falló%s: %s", f" imagen={indice}" if indice is not None else "", exc)
+        return ""
+    finally:
+        if tmp_path:
+            with contextlib.suppress(Exception):
+                os.unlink(tmp_path)
+
+
+def _ocr_imagenes(imagenes: list[bytes], *, nombre_origen: str = "documento") -> str:
+    """OCR local sobre una lista de imágenes, manteniendo orden y paginación."""
+    if not PLUMA_OCR_LOCAL or not imagenes:
+        return ""
+
+    seleccionadas = imagenes[:OCR_MAX_IMAGENES]
+    partes: list[str] = []
+    for i, img in enumerate(seleccionadas, start=1):
+        texto = _ocr_imagen_tesseract(img, indice=i)
+        if _texto_ocr_suficiente(texto):
+            partes.append(f"[OCR local - {nombre_origen} - página/imagen {i}]\n{texto.strip()}")
+        elif texto:
+            logger.info(
+                "OCR local descartado por baja calidad en %s imagen %d (%d caracteres)",
+                nombre_origen,
+                i,
+                len(texto),
+            )
+
+    if len(imagenes) > len(seleccionadas):
+        partes.append(
+            f"[Aviso técnico] El OCR local procesó {len(seleccionadas)} de {len(imagenes)} "
+            "imágenes para mantener límites razonables de tiempo y memoria."
+        )
+
+    return "\n\n".join(partes).strip()
+
+
 def _extraer_texto_docx(contenido: bytes) -> str:
     from docx import Document
 
@@ -558,22 +730,38 @@ def _documento_desde_payload(payload: dict) -> DocumentoProcesado:
     )
 
 
-def _procesar_impl_serializable(contenido: bytes, nombre: str) -> dict:
+def _procesar_impl_serializable(contenido: bytes, nombre: str, preferencia_entrada: str | None = "auto") -> dict:
     """Versión serializable para el sandbox: no devuelve objetos Python."""
-    return _documento_a_payload(_procesar_impl(contenido, nombre))
+    return _documento_a_payload(_procesar_impl(contenido, nombre, preferencia_entrada=preferencia_entrada))
 
 
 # =============================================================================
 # Función pública
 # =============================================================================
 
-def _procesar_impl(contenido: bytes, nombre: str) -> DocumentoProcesado:
+def _procesar_impl(contenido: bytes, nombre: str, preferencia_entrada: str | None = "auto") -> DocumentoProcesado:
     """Implementación real del procesamiento documental.
 
     Esta función se ejecuta normalmente dentro de un proceso aislado.
+    La preferencia de entrada viene de la interfaz y permite saltar rutas
+    costosas, pero nunca evita la validación MIME real del fichero.
     """
     mime = validar(contenido, nombre)
     familia = TIPOS_ADMITIDOS[mime]
+    preferencia = normalizar_preferencia_entrada(preferencia_entrada)
+
+    if preferencia in {"pdf_texto", "pdf_escaneado"} and familia != "pdf":
+        raise ErrorValidacion(
+            "La opción de entrada seleccionada indica PDF, pero el fichero no es un PDF válido."
+        )
+    if preferencia == "imagen" and familia != "imagen":
+        raise ErrorValidacion(
+            "La opción de entrada seleccionada indica imagen, pero el fichero no es una imagen admitida."
+        )
+    if preferencia == "texto" and familia not in {"pdf", "docx", "texto"}:
+        raise ErrorValidacion(
+            "La opción de entrada seleccionada indica texto/PDF con capa textual, pero el fichero no contiene un formato textual admitido."
+        )
 
     texto: str | None = None
     imagenes: list[bytes] | None = None
@@ -584,11 +772,42 @@ def _procesar_impl(contenido: bytes, nombre: str) -> DocumentoProcesado:
         texto_crudo, paginas = _extraer_texto_pdf(contenido)
         calidad = _calidad_ocr(texto_crudo, paginas)
         logger.info(
-            "Calidad estimada del texto PDF: %.2f (%d chars, %d págs)",
-            calidad, len(texto_crudo), paginas,
+            "Calidad estimada del texto PDF: %.2f (%d chars, %d págs; preferencia=%s)",
+            calidad, len(texto_crudo), paginas, preferencia,
         )
 
-        if calidad >= 0.5:
+        if preferencia in {"pdf_texto", "texto"}:
+            # El usuario declara que el PDF ya tiene OCR/capa textual. No se
+            # renderiza ni se pasa OCR/visión. Si la capa textual no existe,
+            # se devuelve un error claro para que elija "PDF escaneado".
+            texto = _limpiar_texto(texto_crudo)
+            if not _texto_ocr_suficiente(texto):
+                raise ErrorValidacion(
+                    "Ha indicado que el PDF ya tiene OCR/capa textual, pero no se ha encontrado texto suficiente. "
+                    "Seleccione 'PDF escaneado/sin OCR' o 'Automático' para aplicar OCR local."
+                )
+            ruta = "texto"
+
+        elif preferencia == "pdf_escaneado":
+            logger.info("Preferencia de entrada: PDF escaneado; se omite la capa textual y se aplica OCR local")
+            imagenes_generadas = _pdf_a_imagenes(contenido, max_paginas=PAGINAS_PDF_VISION_MAX)
+            texto_ocr = _ocr_imagenes(imagenes_generadas, nombre_origen=nombre)
+            if _texto_ocr_suficiente(texto_ocr):
+                texto = _limpiar_texto(texto_ocr)
+                imagenes = None
+                ruta = "texto"
+                logger.info("PDF escaneado procesado por OCR local: %d caracteres extraídos", len(texto))
+            else:
+                imagenes = imagenes_generadas
+                ruta = "vision"
+                logger.info("OCR local insuficiente en PDF escaneado; cambiando a ruta visión")
+                if paginas > PAGINAS_PDF_VISION_MAX:
+                    logger.info(
+                        "PDF con %d páginas; se procesan las primeras %d en ruta visión",
+                        paginas, PAGINAS_PDF_VISION_MAX,
+                    )
+
+        elif calidad >= 0.5:
             texto = _limpiar_texto(texto_crudo)
 
             if paginas > PAGINAS_PDF_HIBRIDO or not PDF_HIBRIDO_CON_IMAGENES:
@@ -603,21 +822,33 @@ def _procesar_impl(contenido: bytes, nombre: str) -> DocumentoProcesado:
                     logger.warning("No se pudieron generar imágenes del PDF: %s", e)
                     ruta = "texto"
         else:
-            logger.info("Texto OCR de calidad insuficiente; cambiando a ruta visión")
+            logger.info("Texto PDF insuficiente; intentando OCR local antes de ruta visión")
             try:
-                imagenes = _pdf_a_imagenes(contenido, max_paginas=PAGINAS_PDF_VISION_MAX)
-                ruta = "vision"
-                if paginas > PAGINAS_PDF_VISION_MAX:
+                imagenes_generadas = _pdf_a_imagenes(contenido, max_paginas=PAGINAS_PDF_VISION_MAX)
+                texto_ocr = _ocr_imagenes(imagenes_generadas, nombre_origen=nombre)
+                if _texto_ocr_suficiente(texto_ocr):
+                    texto = _limpiar_texto(texto_ocr)
+                    imagenes = None
+                    ruta = "texto"
                     logger.info(
-                        "PDF con %d páginas; se procesan las primeras %d en ruta visión",
-                        paginas, PAGINAS_PDF_VISION_MAX,
+                        "PDF procesado por OCR local: %d caracteres extraídos",
+                        len(texto),
                     )
+                else:
+                    imagenes = imagenes_generadas
+                    ruta = "vision"
+                    logger.info("OCR local insuficiente; cambiando a ruta visión")
+                    if paginas > PAGINAS_PDF_VISION_MAX:
+                        logger.info(
+                            "PDF con %d páginas; se procesan las primeras %d en ruta visión",
+                            paginas, PAGINAS_PDF_VISION_MAX,
+                        )
             except ErrorValidacion:
                 raise
             except Exception as e:
                 raise ErrorValidacion(
                     f"El PDF no tiene texto legible y no se pudo convertir "
-                    f"a imagen para procesamiento visual: {e}"
+                    f"a imagen/OCR para procesamiento: {e}"
                 ) from None
 
     elif familia == "docx":
@@ -634,8 +865,19 @@ def _procesar_impl(contenido: bytes, nombre: str) -> DocumentoProcesado:
         ruta = "texto"
 
     elif familia == "imagen":
-        imagenes = [_validar_imagen(contenido)]
-        ruta = "vision"
+        imagen_validada = _validar_imagen(contenido)
+        texto_ocr = _ocr_imagenes([imagen_validada], nombre_origen=nombre)
+        if _texto_ocr_suficiente(texto_ocr):
+            texto = _limpiar_texto(texto_ocr)
+            imagenes = None
+            ruta = "texto"
+            logger.info(
+                "Imagen procesada por OCR local: %d caracteres extraídos",
+                len(texto),
+            )
+        else:
+            imagenes = [imagen_validada]
+            ruta = "vision"
 
     else:
         raise ErrorValidacion(f"Familia de tipo no soportado: {familia}")
@@ -661,7 +903,7 @@ def _decodificar_texto(contenido: bytes) -> str:
     raise ErrorValidacion("No se pudo decodificar el fichero de texto.")
 
 
-def procesar(contenido: bytes, nombre: str) -> DocumentoProcesado:
+def procesar(contenido: bytes, nombre: str, preferencia_entrada: str | None = "auto") -> DocumentoProcesado:
     """
     Valida y prepara el fichero para el extractor.
 
@@ -674,7 +916,7 @@ def procesar(contenido: bytes, nombre: str) -> DocumentoProcesado:
         and os.getenv("_PLUMA_SANDBOX_CHILD") != "1"
     ):
         try:
-            payload = ejecutar_en_sandbox("app.router:_procesar_impl_serializable", contenido, nombre)
+            payload = ejecutar_en_sandbox("app.router:_procesar_impl_serializable", contenido, nombre, preferencia_entrada)
             if not isinstance(payload, dict):
                 raise ErrorValidacion("El parser aislado devolvió una respuesta inválida.")
             return _documento_desde_payload(payload)
@@ -692,4 +934,4 @@ def procesar(contenido: bytes, nombre: str) -> DocumentoProcesado:
                 "Puede estar dañado, ser demasiado complejo o requerir división previa."
             ) from None
 
-    return _procesar_impl(contenido, nombre)
+    return _procesar_impl(contenido, nombre, preferencia_entrada=preferencia_entrada)

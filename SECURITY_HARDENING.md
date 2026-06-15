@@ -7,6 +7,16 @@ revisada previamente. No sustituye una auditoría profesional ni pruebas de
 fuzzing, pero reduce los riesgos principales para una release pública local y
 formativa.
 
+
+## Actualización v0.7.0 — OCR-first y reducción de superficie corregible
+
+- Se adopta flujo **text-first / OCR-first**: los PDF con capa textual suficiente no se re-OCRizan; los PDF escaneados e imágenes pasan por Tesseract local antes de recurrir a visión multimodal.
+- La visión multimodal queda como fallback para manuscritos o documentos donde OCR local no extrae texto suficiente.
+- La imagen final elimina `pip`, `setuptools` y `wheel` del runtime. La aplicación no instala paquetes en ejecución; esto reduce superficie y elimina las vulnerabilidades corregibles detectadas por Docker Scout en `pip`.
+- La imagen base pasa a `python:3.12-slim-bookworm` como rama conservadora para la línea 0.7.x.
+- Se documenta el criterio de aceptación de CVE para release local: 0 críticas, 0 altas corregibles y 0 medias corregibles; las vulnerabilidades sin versión corregida deben quedar justificadas y mitigadas por aislamiento local, usuario no privilegiado, `read_only`, `no-new-privileges`, límites de recursos y publicación exclusiva en loopback.
+- Se incorporan scripts de auditoría para Windows y POSIX en `scripts/auditar_seguridad.*`.
+
 ## Cambios principales acumulados
 
 1. **Corte temprano de cuerpos HTTP**

@@ -67,7 +67,7 @@ echo "Eliminando contenedores y volúmenes..."
 $COMPOSE down -v
 
 # Imagen de la app (se regenera la próxima instalación)
-docker image rm pluma-app:0.6.0-beta 2>/dev/null || true
+docker image rm pluma-app:0.7.0 2>/dev/null || true
 docker image rm pluma-app 2>/dev/null || true
 
 echo ""

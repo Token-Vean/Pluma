@@ -24,7 +24,7 @@
     <img class="marca-logo" src="img/pluma-logo-header.png"
          alt="PlumA" width="auto" height="40">
     <div class="marca-texto">
-      <div class="marca-subtitulo" data-i18n="brand.subtitle">AI Assistant for Archival Description · v0.6.0-beta</div>
+      <div class="marca-subtitulo" data-i18n="brand.subtitle">AI Assistant for Archival Description · v0.7.0</div>
     </div>
   </div>
 
@@ -102,7 +102,25 @@
       <div class="drop-secundario" data-i18n="drop.subtitle">o haga clic para seleccionarlo</div>
       <div class="drop-formatos">PDF · DOCX · TXT · JPG · PNG · TIFF</div>
     </div>
-    <input type="file" id="selector-fichero" style="display: none;" accept=".pdf,.docx,.txt,.jpg,.jpeg,.png,.tif,.tiff,.webp">
+    <input type="file" id="selector-fichero" style="display: none;" multiple accept=".pdf,.docx,.txt,.jpg,.jpeg,.png,.tif,.tiff,.webp">
+
+    <div class="modelo-previo">
+      <label class="bloque-control bloque-control-modelo" title="Modelo de Ollama usado para describir" data-i18n-title="model.title">
+        <span class="etiqueta-control" data-i18n="controls.model">Modelo</span>
+        <select class="selector-norma selector-modelo-ollama" aria-label="Modelo de Ollama" data-i18n-aria-label="model.title"></select>
+      </label>
+    </div>
+
+    <div class="cola-archivos" id="cola-archivos">
+      <div class="cola-archivos-cabecera">
+        <span class="cola-archivos-titulo" data-i18n="files.queueTitle">Archivos del documento</span>
+        <span class="cola-archivos-ayuda" data-i18n="files.queueHelp">Puede reordenarlos antes de procesar.</span>
+      </div>
+      <ol class="lista-archivos" id="lista-archivos"></ol>
+      <button class="boton boton-primario" id="boton-procesar-documento" disabled title="Procesar documento" data-i18n-title="files.processTitle">
+        <span data-i18n="files.processButton">Procesar documento</span>
+      </button>
+    </div>
 
     <div class="privacidad-nota">
       <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -160,6 +178,11 @@
         <select class="selector-norma" id="selector-norma"></select>
       </div>
 
+      <div class="bloque-control bloque-control-modelo" title="Modelo de Ollama usado para describir" data-i18n-title="model.title">
+        <span class="etiqueta-control" data-i18n="controls.model">Modelo</span>
+        <select class="selector-norma selector-modelo-ollama" aria-label="Modelo de Ollama" data-i18n-aria-label="model.title"></select>
+      </div>
+
       <div class="bloque-control">
         <span class="etiqueta-control" data-i18n="controls.mode">Modo</span>
         <div class="modos" id="selector-modo">
@@ -168,6 +191,11 @@
           <button class="modo" id="boton-personalizar" data-i18n="custom.button" title="Filtrar campos a mostrar y exportar" data-i18n-title="custom.title">Personalizar campos</button>
         </div>
       </div>
+
+      <label class="bloque-control bloque-control-checkbox" title="Activar una pasada previa de IA para identificar el tipo documental" data-i18n-title="controls.detectTypeTitle">
+        <input type="checkbox" id="check-extraer-tipo-documental">
+        <span class="etiqueta-control etiqueta-control-checkbox" data-i18n="controls.detectType">Extraer tipo documental</span>
+      </label>
 
       <div class="idioma-salida-nota idioma-salida-nota-sesion">
         <span data-i18n="outputLanguage.note">Idioma de salida: la descripción se generará en el idioma seleccionado en la interfaz.</span>
