@@ -88,7 +88,7 @@ services:
     cpus: 4
 
   app:
-    image: pluma-app:0.7.0
+    image: pluma-app:0.7.1
     build: ./backend
     # Imagen construida en local; nunca se descarga de un registro.
     pull_policy: never

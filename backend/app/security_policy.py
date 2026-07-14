@@ -36,6 +36,8 @@ CABECERAS_PROXY_PROHIBIDAS = {
     "x-forwarded-host",
     "x-forwarded-server",
     "x-forwarded-for",
+    "x-forwarded-proto",
+    "x-forwarded-port",
     "x-real-ip",
     "x-original-host",
 }

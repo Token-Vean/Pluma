@@ -1,7 +1,7 @@
 # Problemas conocidos y riesgos residuales
 
 Este documento recoge los problemas conocidos de PlumA en su versión
-**0.7.0**. Está pensado para que cualquier persona que evalúe la
+**0.7.1**. Está pensado para que cualquier persona que evalúe la
 herramienta para un piloto, una auditoría, o un despliegue controlado,
 sepa de antemano qué limitaciones existen.
 
@@ -14,7 +14,7 @@ Este fichero describe únicamente el estado vigente. El histórico de
 problemas resueltos en versiones anteriores está en `CHANGELOG.md` y en
 las notas de cada release de GitHub.
 
-## Pendientes y riesgos residuales — v0.7.0
+## Pendientes y riesgos residuales — v0.7.1
 
 ### Modelo de amenaza CSRF
 
@@ -96,7 +96,7 @@ Para una release candidate harían falta:
 PlumA se ha desarrollado y probado primariamente en **Windows con
 Docker Desktop**. La compatibilidad con Linux y macOS está basada en que
 el código y la infraestructura (Docker, Python) son multiplataforma,
-pero **v0.7.0 sigue siendo una fase de validación pública en el que se abre a probar
+pero **v0.7.x sigue siendo una fase de validación pública en el que se abre a probar
 activamente en estos sistemas**.
 
 Casos previsibles donde podría haber problemas:
@@ -151,6 +151,27 @@ también la extracción del modelo.
 Limitación conocida: si se cambia de norma, conviene reprocesar antes de
 reutilizar una selección personalizada, porque las claves de campo
 pueden no coincidir entre normas.
+
+### Parseo XML de DOCX mediante lxml
+
+`python-docx` parsea el XML interno de documentos DOCX no confiables con
+`lxml`. Los valores por defecto de `lxml` (`no_network`, `huge_tree=False`)
+y los límites de tamaño que PlumA aplica antes de entregar el fichero
+(entradas, descompresión, ratio, `document.xml`) mitigan la expansión de
+entidades y las cargas patológicas, y el parseo ocurre dentro del sandbox
+de procesos con límites de memoria y tiempo. Se documenta como riesgo
+residual: no se usa `defusedxml` porque `python-docx` no permite inyectar
+el parser sin parchear la librería.
+
+### Ejecución de la imagen fuera de docker-compose
+
+El `CMD` del Dockerfile arranca uvicorn en `0.0.0.0:8081` porque dentro de
+Docker el puerto debe ser alcanzable desde la publicación del compose, que
+lo limita a `127.0.0.1:8082` del host. Si alguien ejecuta la imagen suelta
+con `docker run -p 8082:8081` (sin el compose), la publicación dependerá de
+los flags que use y la única barrera restante será el middleware de
+Host/Origin/CSRF. El despliegue soportado es exclusivamente mediante
+`docker compose` con el fichero del repositorio.
 
 ## Riesgos residuales reconocidos
 
@@ -211,7 +232,7 @@ con `OLLAMA_HOST=127.0.0.1`.
 ### Imagen oficial `ollama/ollama` no escaneada
 
 El workflow `.github/workflows/security-checks.yml` ejecuta Trivy sobre
-`pluma-app:0.7.0` (la imagen que construimos). La imagen
+`pluma-app:0.7.1` (la imagen que construimos). La imagen
 `ollama/ollama:0.21.2` que se usa en el perfil bundled no se escanea: es
 upstream y no la construimos nosotros. Los CVEs de Ollama deben
 monitorizarse en sus releases. Mantener la versión fijada en

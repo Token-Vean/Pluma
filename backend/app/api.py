@@ -391,7 +391,19 @@ def _combinar_documentos(docs: list[router_entrada.DocumentoProcesado]) -> route
     )
 
 
-async def _procesar_archivos_subidos(archivos: list[UploadFile], peticion_id: str) -> tuple[router_entrada.DocumentoProcesado, str | None, list[dict[str, Any]]]:
+def _actualizar_hash_documento(h, indice: int, nombre: str, contenido: bytes) -> None:
+    h.update(str(indice).encode("utf-8"))
+    h.update(b"\0")
+    h.update(nombre.encode("utf-8", errors="replace"))
+    h.update(b"\0")
+    h.update(contenido)
+
+
+async def _procesar_archivos_subidos(
+    archivos: list[UploadFile],
+    peticion_id: str,
+    preferencia_entrada: str = "auto",
+) -> tuple[router_entrada.DocumentoProcesado, str | None, list[dict[str, Any]]]:
     """Lee, valida y combina uno o varios ficheros subidos."""
     docs: list[router_entrada.DocumentoProcesado] = []
     archivos_meta: list[dict[str, Any]] = []
@@ -410,14 +422,16 @@ async def _procesar_archivos_subidos(archivos: list[UploadFile], peticion_id: st
 
         nombre = archivo.filename or f"archivo_{i}"
         if h is not None:
-            h.update(str(i).encode("utf-8"))
-            h.update(b"\0")
-            h.update(nombre.encode("utf-8", errors="replace"))
-            h.update(b"\0")
-            h.update(contenido)
+            # En hilo aparte: sha256 sobre ficheros de decenas de MB bloquearía
+            # el event loop y con él el polling de /api/estado de la interfaz.
+            await asyncio.to_thread(_actualizar_hash_documento, h, i, nombre, contenido)
 
         try:
-            doc = router_entrada.procesar(contenido, nombre)
+            # procesar() es síncrono y puede tardar (spawn del sandbox, parseo,
+            # OCR local). Se delega a un hilo para no congelar el event loop.
+            doc = await asyncio.to_thread(
+                router_entrada.procesar, contenido, nombre, preferencia_entrada
+            )
         except ErrorValidacion as e:
             _log_peticion("describir_validacion_fallida", peticion_id, archivo=i, error=str(e))
             raise HTTPException(400, f"Archivo {i} ({nombre}): {e}") from None
@@ -482,6 +496,7 @@ async def describir(
     detectar_tipo: bool = Form(False),
     idioma_salida: str = Form("es"),
     modelo: str | None = Form(None),
+    preferencia_entrada: str = Form("auto"),
 ):
     """Procesa uno o varios ficheros que forman una única unidad documental."""
     peticion_id = str(uuid.uuid4())[:8]
@@ -491,6 +506,11 @@ async def describir(
         raise HTTPException(400, f"Norma desconocida: {norma}")
     if modo not in ("esencial", "completo", "personalizado"):
         raise HTTPException(400, f"Modo desconocido: {modo}")
+
+    try:
+        preferencia = router_entrada.normalizar_preferencia_entrada(preferencia_entrada)
+    except ErrorValidacion as e:
+        raise HTTPException(400, str(e)) from None
 
     idioma_salida = (idioma_salida or "es").strip().lower()
     if idioma_salida not in IDIOMAS_SALIDA_ADMITIDOS:
@@ -508,9 +528,12 @@ async def describir(
             detectar_tipo=detectar_tipo,
             idioma_salida=idioma_salida,
             modelo_solicitado=(modelo or "auto"),
+            preferencia_entrada=preferencia,
         )
 
-        doc, sha256_documento, archivos_meta = await _procesar_archivos_subidos(archivos, peticion_id)
+        doc, sha256_documento, archivos_meta = await _procesar_archivos_subidos(
+            archivos, peticion_id, preferencia_entrada=preferencia
+        )
         requiere_vision = bool(doc.entrada.imagenes)
         modelo_seleccionado = await _resolver_modelo_solicitado(
             modelo,
@@ -688,6 +711,7 @@ async def describir(
             "tamano_bytes": doc.tamano_bytes,
             "paginas": doc.paginas,
             "ruta_procesamiento": doc.ruta,
+            "preferencia_entrada": preferencia,
             "num_archivos": len(archivos_meta),
             "archivos": archivos_meta,
         },

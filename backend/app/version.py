@@ -8,5 +8,5 @@ frontend, exportadores y fichas técnicas.
 from __future__ import annotations
 
 APP_NAME = "PlumA"
-APP_VERSION = "0.7.0"
+APP_VERSION = "0.7.1"
 APP_AGENT = f"{APP_NAME} v{APP_VERSION}"

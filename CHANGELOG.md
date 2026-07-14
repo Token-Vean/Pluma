@@ -8,6 +8,44 @@ de cada versión publicada, junto con su manifiesto SHA-256, están adjuntas a
 la entrada correspondiente de
 [GitHub Releases](https://github.com/Token-Vean/Pluma/releases).
 
+## [0.7.1] — 2026-07-14
+
+Versión de mantenimiento centrada en seguridad de dependencias y correcciones
+de la auditoría interna de v0.7.0. Sin cambios funcionales que rompan la API:
+`/api/describir` añade un parámetro opcional retrocompatible.
+
+### Seguridad
+
+- Dependencias Python actualizadas (grupo Dependabot de 2026-06-22):
+  `fastapi` 0.136.0→0.138.0, `starlette` 1.0.1→1.3.1, `uvicorn` 0.45.0→0.49.0,
+  `python-multipart` 0.0.27→0.0.32, `pypdf` 6.12.0→6.13.3,
+  `pypdfium2` 5.7.1→5.10.1, `httptools` 0.7.1→0.8.0. Se conserva el marcador
+  `; sys_platform != "win32"` de `uvloop` (Dependabot lo eliminaba y rompería
+  la instalación nativa en Windows).
+- GitHub Actions actualizadas: `actions/checkout@v6`, `actions/setup-python@v6`,
+  `aquasecurity/trivy-action@v0.36.0`.
+- `x-forwarded-proto` y `x-forwarded-port` se añaden a las cabeceras de proxy
+  rechazadas en modo local estricto (completa la lista existente).
+
+### Corregido
+
+- `/api/describir` ya no bloquea el event loop: el parseo documental
+  (sandbox, OCR) y el cálculo del hash SHA-256 se ejecutan en un hilo
+  aparte con `asyncio.to_thread`. El polling de `/api/estado` deja de
+  congelarse mientras se procesa un documento.
+- La ficha técnica de auditoría genera el timestamp con zona horaria
+  (`datetime.now().astimezone()`) en lugar de hora local naïve.
+
+### Añadido
+
+- `/api/describir` acepta el parámetro de formulario opcional
+  `preferencia_entrada` (`auto` | `pdf_texto` | `pdf_escaneado` | `imagen` |
+  `texto`). El router ya lo implementaba pero la API no lo exponía; permite a
+  la interfaz saltar rutas costosas cuando el usuario conoce el tipo de
+  documento. La preferencia aplicada se refleja en la respuesta
+  (`documento.preferencia_entrada`). Valor por defecto `auto`: comportamiento
+  idéntico a 0.7.0 si no se envía.
+
 ## [0.7.0] — 2026-06-15
 
 ### Añadido

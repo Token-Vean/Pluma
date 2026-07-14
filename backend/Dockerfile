@@ -37,7 +37,7 @@ RUN pip install --prefix=/install -r requirements.txt
 FROM ${PYTHON_IMAGE}
 
 LABEL org.opencontainers.image.title="PlumA" \
-      org.opencontainers.image.version="0.7.0" \
+      org.opencontainers.image.version="0.7.1" \
       org.opencontainers.image.description="PlumA local-first archival description assistant"
 
 ENV PYTHONDONTWRITEBYTECODE=1 \

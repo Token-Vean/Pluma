@@ -13,9 +13,9 @@ jobs:
   python-security:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
 
@@ -42,15 +42,15 @@ jobs:
   container-scan:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Build local image
         run: docker compose build app
 
       - name: Trivy image scan
-        uses: aquasecurity/trivy-action@v0.35.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
-          image-ref: 'pluma-app:0.7.0'
+          image-ref: 'pluma-app:0.7.1'
           format: 'table'
           severity: 'CRITICAL,HIGH'
           ignore-unfixed: true

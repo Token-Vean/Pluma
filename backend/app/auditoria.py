@@ -78,7 +78,7 @@ def generar_ficha_tecnica(
             "version": APP_VERSION,
         },
         "peticion_id": peticion_id,
-        "generado": dt.datetime.now().isoformat(timespec="seconds"),
+        "generado": dt.datetime.now().astimezone().isoformat(timespec="seconds"),
         "documento": {
             "nombre": getattr(documento, "nombre_original", None),
             "sha256": sha256_documento,
