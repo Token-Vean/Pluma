@@ -22,6 +22,8 @@ de la auditoría interna de v0.7.0. Sin cambios funcionales que rompan la API:
   `pypdfium2` 5.7.1→5.10.1, `httptools` 0.7.1→0.8.0. Se conserva el marcador
   `; sys_platform != "win32"` de `uvloop` (Dependabot lo eliminaba y rompería
   la instalación nativa en Windows).
+- `Pillow` 12.2.0→12.3.0: corrige los avisos PYSEC-2026-2253 a PYSEC-2026-2257
+  detectados por `pip-audit` en CI (posteriores al grupo de Dependabot).
 - GitHub Actions actualizadas: `actions/checkout@v6`, `actions/setup-python@v6`,
   `aquasecurity/trivy-action@v0.36.0`.
 - `x-forwarded-proto` y `x-forwarded-port` se añaden a las cabeceras de proxy
