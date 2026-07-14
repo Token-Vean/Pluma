@@ -26,36 +26,28 @@ te lo dirá.
 
 ## Cómo funciona la instalación
 
-El instalador configura PlumA para usar el **Ollama nativo/local del usuario**.
-La aplicación no arranca Ollama dentro de Docker ni descarga modelos en un
-volumen Docker por defecto.
+Ejecuta `instalar.bat` en Windows o `./instalar.sh` en Linux/macOS. El
+instalador elige automáticamente uno de estos perfiles:
 
-Flujo esperado:
+1. **Host**. Si Ollama ya responde en `127.0.0.1:11434` y contiene al menos un
+   modelo, PlumA reutiliza esa instalación. Si está disponible `gemma4:e2b`, lo
+   selecciona como preferido; si no, permite elegir otro modelo local.
+2. **Bundled**. Si no hay un Ollama nativo utilizable, el instalador arranca
+   Ollama dentro de Docker, descarga `gemma4:e2b` y conserva el modelo en un
+   volumen local. La descarga inicial puede ocupar varios gigabytes y tardar.
 
-1. Instala e inicia Ollama en el equipo anfitrión.
-2. Descarga al menos un modelo con `ollama pull`. Recomendado:
-   `ollama pull gemma4:e2b`.
-3. Ejecuta `instalar.bat` o `instalar.sh`. PlumA se conectará a
-   `host.docker.internal:11434` desde el contenedor de la aplicación.
-4. Desde la interfaz podrás elegir cualquiera de los modelos ya descargados.
-
-Si `gemma4:e2b` no existe, PlumA elegirá otro modelo local disponible. Si
-Ollama responde pero no tiene modelos, o si Ollama no está iniciado, la interfaz
-mostrará un error claro y no intentará descargar modelos dentro de Docker.
-
-3. Si el fichero contenía secretos reales (claves, tokens),
-   **rótalos**. Asume que todo lo que ha estado en GitHub público,
-   aunque se borre, ha podido ser visto y archivado por terceros.
-
-Lo más fácil es prevenir: ejecutar el verificador antes de cada `push`.
+En ambos perfiles la interfaz queda disponible únicamente en
+<http://127.0.0.1:8082> y los documentos se procesan localmente. El perfil
+`bundled` necesita conexión a Internet durante la descarga inicial del modelo;
+después puede utilizarse sin conexión.
 
 
 ## Endurecimiento de Ollama nativo (modo host)
 
-PlumA usa el Ollama nativo/local del usuario (`PLUMA_OLLAMA_MODE=host`)
-en lugar de levantar un segundo Ollama dentro de Docker. Esto evita duplicar
-modelos y asegura que se trabaja con los modelos que el usuario ya tiene
-descargados y controla desde su instalación de Ollama.
+Cuando el instalador selecciona el perfil host, PlumA usa el Ollama
+nativo/local del usuario (`PLUMA_OLLAMA_MODE=host`) en lugar de levantar un
+segundo Ollama dentro de Docker. Esto evita duplicar modelos y asegura que se
+trabaja con los modelos que el usuario ya tiene descargados y controla.
 
 **Punto de atención de seguridad.** El servicio de Ollama, por defecto,
 escucha en `0.0.0.0:11434`, es decir, acepta conexiones desde cualquier
@@ -120,9 +112,9 @@ Verifica con `ss -tlnp | grep 11434`. Debe aparecer `127.0.0.1:11434`.
 ### Comprobación final
 
 Tras endurecer Ollama, vuelve a ejecutar `instalar.sh`/`instalar.bat`.
-El instalador comprobará si Ollama del host responde en `127.0.0.1` y volverá
-a configurar el modo host. Si Ollama no responde, PlumA arrancará igualmente,
-pero mostrará error hasta que Ollama esté iniciado.
+El instalador comprobará si Ollama del host responde en `127.0.0.1` y contiene
+algún modelo. Si es así, configurará el modo host; si no, ofrecerá el entorno
+`bundled` administrado mediante Docker.
 
 ### Por qué no lo hace PlumA automáticamente
 

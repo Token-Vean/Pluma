@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-IMAGE="pluma-app:0.7.0"
+IMAGE="pluma-app:0.7.1"
 
-echo "PlumA v0.7.0 - auditoría local de seguridad"
+echo "PlumA v0.7.1 - auditoría local de seguridad"
 echo "------------------------------------------------"
 
 echo "[1/4] Comprobación estática del repositorio"

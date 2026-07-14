@@ -39,6 +39,26 @@ jobs:
           PYTHONPATH: backend
         run: pytest -q
 
+  windows-dependencies:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install backend on Windows
+        run: python -m pip install -r backend/requirements.txt
+
+      - name: Install test dependencies
+        run: python -m pip install pytest pyyaml
+
+      - name: Unit tests on Windows
+        env:
+          PYTHONPATH: backend
+        run: python -m pytest -q
+
   container-scan:
     runs-on: ubuntu-latest
     steps:

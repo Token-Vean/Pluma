@@ -152,7 +152,7 @@ El proyecto se compromete a ejecutar, al menos en cada release,
 las siguientes comprobaciones:
 
 - `pip-audit` sobre las dependencias Python.
-- `docker scout cves --only-fixed pluma-app:0.7.0` o `trivy image --ignore-unfixed` sobre la imagen Docker de la aplicación.
+- `docker scout cves --only-fixed pluma-app:0.7.1` o `trivy image --ignore-unfixed` sobre la imagen Docker de la aplicación.
 - Revisión manual de CVE conocidos de `pypdf`, `pypdfium2`, `Pillow`, Tesseract, FastAPI/Starlette y librerías nativas de imagen/XML.
 - Criterio mínimo de release: 0 críticas, 0 altas corregibles y 0 medias corregibles. Las vulnerabilidades sin fixed version deben documentarse en `SECURITY_NOTES.md` junto con sus mitigaciones.
 

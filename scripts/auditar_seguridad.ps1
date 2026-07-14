@@ -1,7 +1,7 @@
 $ErrorActionPreference = 'Stop'
 
-$Image = 'pluma-app:0.7.0'
-Write-Host 'PlumA v0.7.0 - auditoría local de seguridad' -ForegroundColor Cyan
+$Image = 'pluma-app:0.7.1'
+Write-Host 'PlumA v0.7.1 - auditoría local de seguridad' -ForegroundColor Cyan
 Write-Host '------------------------------------------------'
 
 Write-Host '[1/4] Comprobación estática del repositorio'

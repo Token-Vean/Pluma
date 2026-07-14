@@ -29,8 +29,8 @@ cualquier otro).
 ## Características principales
 
 - **Procesamiento local**. Tras instalar dependencias/modelos, los
-  documentos no salen del equipo: el motor de IA (Ollama) y la aplicación
-  corren en contenedores Docker, la interfaz solo se publica en
+  documentos no salen del equipo: la aplicación corre en Docker y el motor
+  de IA (Ollama) se ejecuta en el host o en un contenedor local, la interfaz solo se publica en
   `127.0.0.1`, y el backend rechaza cualquier endpoint LLM que no sea
   local. El detalle de qué garantiza cada capa (y qué no) está en la
   sección "Garantías de aislamiento local" y en `SECURITY_HARDENING.md`.
@@ -66,10 +66,11 @@ Una vez Docker esté instalado y arrancado:
 - **Windows**: doble clic en `instalar.bat`.
 - **Linux / macOS**: `chmod +x instalar.sh && ./instalar.sh`.
 
-El instalador configura PlumA para usar el **Ollama nativo/local del usuario**.
-Si tienes `gemma4:e2b` descargado, lo usará como preferido; si no, la interfaz
-permitirá elegir otro modelo ya descargado en Ollama. PlumA no descarga modelos
-dentro de Docker por defecto.
+El instalador usa el **Ollama nativo/local del usuario** cuando está disponible
+y contiene al menos un modelo. Si no lo detecta, activa el perfil `bundled`,
+arranca Ollama dentro de Docker y descarga `gemma4:e2b` en un volumen local.
+La primera instalación puede tardar y consumir varios gigabytes. En ambos
+perfiles los documentos se procesan en el equipo del usuario.
 
 Al terminar, abre el navegador en <http://127.0.0.1:8082>. El puerto es
 fijo por diseño en esta release (solo loopback IPv4).
@@ -164,7 +165,7 @@ local/formativa:
 - Validación defensiva de JSON devuelto por el modelo.
 - Sanitización de CSV frente a fórmulas.
 - Endurecimiento adicional de ambos contenedores (`cap_drop`, `no-new-privileges`, límites de recursos; `read_only` y tmpfs en la app).
-- Workflow de seguridad con Ruff, pytest, `pip-audit`, build Docker y Trivy.
+- Workflow de seguridad con Bandit, pytest, `pip-audit`, build Docker y Trivy.
 
 Sigue siendo una herramienta local de apoyo y formación, no una solución
 certificada para producción ni para tratamiento masivo de documentación
@@ -276,7 +277,7 @@ Estos scripts intentan crear `pluma-texto` desde `gemma4:e2b` y `pluma-vision` d
 
 ## Estado del proyecto
 
-**Versión 0.7.0 — OCR-first y hardening.** Esta versión está pensada para
+**Versión 0.7.1 — mantenimiento y hardening.** Esta versión está pensada para
 evaluación por archiveros, formación, demostraciones y entornos de
 prueba controlados. **No es apta para producción** sin auditoría previa
 y sin las acciones que se describen en `SECURITY_HARDENING.md`

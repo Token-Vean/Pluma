@@ -2,7 +2,7 @@
 # tools/windows/enforce-local-config.ps1
 # -----------------------------------------------------------------------------
 # Aplica configuración local bloqueada al .env de PlumA en Windows y fija
-# el uso de Ollama nativo/local del usuario.
+# el uso de Ollama nativo cuando está disponible o del perfil bundled.
 #
 # Comportamiento:
 #   1. Si no existe .env pero sí .env.example, lo copia.
@@ -12,9 +12,8 @@
 #      las fija el propio instalador.
 #   3. Garantiza PUERTO=8082 y MODELO_BASE=gemma4:e2b si no están definidas.
 #   4. Detecta si hay Ollama nativo en el host y lista sus modelos.
-#   5. Escribe PLUMA_OLLAMA_MODE=host y PLUMA_OLLAMA_URL en .env.
-#   6. Devuelve por stdout una línea "PLUMA_INSTALADOR_PROFILE=" para que
-#      Compose no active el contenedor de Ollama por defecto.
+#   5. Elige host si hay al menos un modelo local; en otro caso, bundled.
+#   6. Escribe PLUMA_OLLAMA_MODE/URL y devuelve el perfil a instalar.bat.
 #
 # Se invoca desde instalar.bat con la CWD ya situada en la raíz del repo.
 # =============================================================================
@@ -78,6 +77,11 @@ $modeloBase = 'gemma4:e2b'
 $m = [regex]::Match($text, '(?m)^MODELO_BASE=(.+)$')
 if ($m.Success) { $modeloBase = $m.Groups[1].Value.Trim() }
 
+$perfil = 'bundled'
+$modo = 'container'
+$ollamaUrl = 'http://ollama:11434'
+$hostUtilizable = $false
+
 try {
     # 127.0.0.1 explícito: evita problemas de resolución IPv6 de localhost.
     $resp = Invoke-WebRequest -Uri 'http://127.0.0.1:11434/api/tags' `
@@ -88,27 +92,34 @@ try {
         $tags = $resp.Content | ConvertFrom-Json
         $nombres = @($tags.models | ForEach-Object { $_.name } | Where-Object { $_ })
         if ($nombres.Count -eq 0) {
-            Write-Host "Ollama del host responde, pero no hay modelos descargados. Ejecute: ollama pull $modeloBase"
+            Write-Host "Ollama del host responde, pero no hay modelos. Se usara el perfil bundled."
         } elseif (($nombres -contains $modeloBase) -or ($nombres -contains ($modeloBase + ':latest'))) {
+            $hostUtilizable = $true
             Write-Host "Ollama del host responde y tiene $modeloBase."
         } else {
+            $hostUtilizable = $true
             Write-Host "Ollama del host responde, pero no tiene $modeloBase. PlumA usara otro modelo local disponible: $($nombres[0])"
         }
     }
 } catch {
-    Write-Host "Ollama nativo no responde en 127.0.0.1:11434. PlumA arrancara, pero mostrara error hasta que Ollama este iniciado."
+    Write-Host "Ollama nativo no responde. Se usara el perfil bundled administrado por Docker."
 }
 
-$text += "`n# Modo elegido por el instalador: Ollama nativo/local del usuario`n"
-$text += "PLUMA_OLLAMA_MODE=host`n"
-$text += "PLUMA_OLLAMA_URL=http://host.docker.internal:11434`n"
-$perfil = ''
+if ($hostUtilizable) {
+    $perfil = 'host'
+    $modo = 'host'
+    $ollamaUrl = 'http://host.docker.internal:11434'
+}
+
+$text += "`n# Modo elegido automáticamente por el instalador`n"
+$text += "PLUMA_OLLAMA_MODE=$modo`n"
+$text += "PLUMA_OLLAMA_URL=$ollamaUrl`n"
 
 # Escritura sin BOM, LF puros.
 $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 [System.IO.File]::WriteAllText($envPath, $text, $utf8NoBom)
 
-Write-Host "Configuracion saneada. Se usara Ollama nativo/local; no se activa Ollama en Docker por defecto."
+Write-Host "Configuracion saneada. Perfil seleccionado: $perfil."
 
 # Línea que el .bat parseará para saber qué profile activar.
 Write-Host "PLUMA_INSTALADOR_PROFILE=$perfil"

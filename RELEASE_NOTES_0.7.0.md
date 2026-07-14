@@ -29,7 +29,7 @@ v0.7.0 consolida PlumA como herramienta local-first con flujo **text-first / OCR
 ## Instalación recomendada
 
 ```powershell
-cd C:\Users\geren\Documents\SEC\OneDrive\Escritorio\Pluma
+cd C:\ruta\a\Pluma
 docker compose down
 docker compose build --no-cache app
 docker compose up -d

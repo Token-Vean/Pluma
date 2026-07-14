@@ -126,7 +126,7 @@ instalación:
    de GitHub, pero ya no se ejecutan automáticamente en la instalación.
    Solo hay conexión externa si el administrador decide ejecutarlos.
 
-En el perfil `external` (Ollama ya instalado por el usuario), **la
+En el perfil `host` (Ollama ya instalado por el usuario), **la
 aplicación no hace ninguna conexión externa durante el arranque ni
 durante el uso ordinario**.
 
@@ -217,7 +217,7 @@ proporcionalidad (RGPD art. 5.1.c).
 
 ### Limitaciones conocidas del despliegue actual
 
-En el estado actual del proyecto (versión 0.7.0), estas
+En el estado actual del proyecto (versión 0.7.1), estas
 limitaciones residuales se reconocen y se revisarán en versiones futuras:
 
 - **El contenedor de Ollama en perfil `bundled` corre como root**
@@ -225,7 +225,7 @@ limitaciones residuales se reconocen y se revisarán en versiones futuras:
   `ollama/ollama:0.21.2`. Esto es visible por cualquiera que
   inspeccione el contenedor; aunque no compromete los datos del
   anfitrión (Docker aísla el espacio de nombres), sí es un aspecto
-  a mejorar. No aplica al perfil `external`, donde no gestionamos
+  a mejorar. No aplica al perfil `host`, donde no gestionamos
   el proceso de Ollama.
 
 - **El límite de tamaño se comprueba antes y después del parseo**:

@@ -6,13 +6,12 @@ listo, termina en milisegundos. Si falta algo, informa de forma cerrada.
 
 Comportamiento de la release pública:
 
-    host-local-locked → PlumA usa el Ollama nativo/local del usuario en
-                        http://host.docker.internal:11434 desde Docker
-                        o http://localhost:11434 en desarrollo sin contenedor.
+    host      → PlumA usa el Ollama nativo/local del usuario.
+    container → PlumA usa el Ollama incluido en el perfil bundled de Compose.
 
-A partir de esta versión PlumA NO crea modelos derivados ni descarga modelos
-dentro de un contenedor de Ollama por defecto. El system prompt y los
-parámetros de inferencia se inyectan en cada llamada desde
+A partir de esta versión PlumA no crea modelos derivados. El instalador puede
+descargar el modelo base cuando activa el perfil bundled; el system prompt y
+los parámetros de inferencia se inyectan en cada llamada desde
 schemas/pluma-runtime.yaml. Este módulo se limita a:
     1. Verificar que la configuración de runtime existe.
     2. Esperar a que Ollama responda.
@@ -81,10 +80,8 @@ async def preparar() -> None:
         if not elegido:
             raise RuntimeError(
                 "Ollama responde, pero no tiene ningún modelo descargado. "
-                "Descargue uno en su Ollama local, preferiblemente con "
-                "`ollama pull gemma4:e2b`, o cualquier otro modelo compatible, "
-                "y reinicie PlumA. PlumA no descargará modelos dentro de Docker "
-                "si ya se está usando el Ollama del usuario."
+                "Descargue uno, preferiblemente con `ollama pull gemma4:e2b`, "
+                "o vuelva a ejecutar el instalador para preparar el perfil local."
             )
         estado.update(
             fase="listo",
@@ -116,7 +113,7 @@ async def _esperar_ollama(intentos: int = 30, espera: float = 2.0) -> None:
 
     raise RuntimeError(
         f"Ollama no responde en {OLLAMA_URL} tras {intentos * espera:.0f}s. "
-        "Compruebe que Ollama está iniciado en el equipo anfitrión."
+        "Compruebe que el motor Ollama local está iniciado."
     )
 
 

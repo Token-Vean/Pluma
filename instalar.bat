@@ -2,11 +2,9 @@
 REM =============================================================================
 REM PlumA - instalador para Windows en modo local bloqueado
 REM -----------------------------------------------------------------------------
-REM En la arquitectura v0.7.0 el instalador detecta si tienes Ollama nativo en el host
-REM con el modelo base ya descargado. Si lo tiene, configura PlumA para usarlo
-REM via host.docker.internal:11434 y NO arranca el contenedor de Ollama. Si no,
-REM activa el perfil `bundled` de Docker Compose y levanta Ollama dentro de
-REM Docker como antes.
+REM El instalador usa Ollama nativo si responde y contiene al menos un modelo.
+REM En caso contrario activa el perfil `bundled`, levanta Ollama en Docker y
+REM descarga el modelo base antes de arrancar la aplicación.
 REM
 REM Revision de endurecimiento del instalador:
 REM - Deteccion de modo con fallo cerrado: la salida del PS1 se captura en un
@@ -61,9 +59,7 @@ echo.
 echo [3/6] Aplicando configuracion local bloqueada y detectando Ollama...
 REM Contrato con enforce-local-config.ps1:
 REM   - "PLUMA_INSTALADOR_PROFILE=bundled"  -> levantar Ollama en Docker.
-REM   - "PLUMA_INSTALADOR_PROFILE=host"     -> usar Ollama nativo (recomendado
-REM     que el PS1 lo imprima explicitamente).
-REM   - Sin linea (contrato heredado)       -> modo host, SOLO si exit code 0.
+REM   - "PLUMA_INSTALADOR_PROFILE=host"     -> usar Ollama nativo.
 REM La salida se redirige a fichero para que el exit code de PowerShell sea
 REM comprobable: con `for /f` directo se pierde y el `set` del bloque lo
 REM resetea a 0.
@@ -81,19 +77,55 @@ for /f "usebackq tokens=1,* delims==" %%A in ("!PLUMA_PS1_OUT!") do (
     if /I "%%A"=="PLUMA_INSTALADOR_PROFILE" set "PLUMA_PROFILE=%%B"
 )
 del "!PLUMA_PS1_OUT!" >nul 2>&1
+if /I not "!PLUMA_PROFILE!"=="host" if /I not "!PLUMA_PROFILE!"=="bundled" (
+    echo ERROR: El saneador no devolvio un perfil valido ^(host o bundled^).
+    pause
+    exit /b 1
+)
 echo OK - Configuracion saneada
 echo.
 
 echo [4/6] Preparando imagen y servicios...
+set "MODELO_BASE=gemma4:e2b"
+if exist .env (
+    for /f "tokens=2 delims==" %%a in ('findstr /b "MODELO_BASE=" .env 2^>nul') do set "MODELO_BASE=%%a"
+)
 if /I "!PLUMA_PROFILE!"=="bundled" (
     set "COMPOSE_PROFILES=bundled"
     echo Modo: container ^(Ollama se levantara dentro de Docker^)
+    docker compose up -d ollama
+    if errorlevel 1 (
+        echo ERROR: No se pudo arrancar Ollama en Docker.
+        pause
+        exit /b 1
+    )
+    echo Esperando a Ollama...
+    set "OLLAMA_LISTO="
+    for /L %%I in (1,1,30) do (
+        if not defined OLLAMA_LISTO (
+            docker compose exec -T ollama ollama list >nul 2>&1
+            if not errorlevel 1 set "OLLAMA_LISTO=1"
+            if not defined OLLAMA_LISTO timeout /t 1 /nobreak >nul
+        )
+    )
+    if not defined OLLAMA_LISTO (
+        echo ERROR: Ollama no ha respondido dentro del tiempo esperado.
+        pause
+        exit /b 1
+    )
+    echo Descargando o verificando el modelo !MODELO_BASE! ^(puede tardar^)...
+    docker compose exec -T ollama ollama pull "!MODELO_BASE!"
+    if errorlevel 1 (
+        echo ERROR: No se pudo descargar el modelo !MODELO_BASE!.
+        pause
+        exit /b 1
+    )
 ) else (
-    REM Valor "host" explicito o ausencia de linea con exit code 0.
     set "COMPOSE_PROFILES="
     echo Modo: host ^(la app usara el Ollama nativo del sistema^)
+    docker compose --profile bundled stop ollama >nul 2>&1
 )
-docker compose up -d --build
+docker compose up -d --build app
 if errorlevel 1 (
     echo ERROR: No se pudieron arrancar los servicios.
     pause

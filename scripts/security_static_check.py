@@ -136,11 +136,44 @@ def test_version_coherence() -> None:
         "docker-compose.yml": read(ROOT / "docker-compose.yml"),
         "frontend/static/app.js": read(ROOT / "frontend" / "static" / "app.js"),
         "frontend/static/index.html": read(ROOT / "frontend" / "static" / "index.html"),
+        "iniciar.bat": read(ROOT / "iniciar.bat"),
+        "desinstalar.bat": read(ROOT / "desinstalar.bat"),
+        "desinstalar.sh": read(ROOT / "desinstalar.sh"),
+        "scripts/auditar_seguridad.sh": read(ROOT / "scripts" / "auditar_seguridad.sh"),
+        "scripts/auditar_seguridad.ps1": read(ROOT / "scripts" / "auditar_seguridad.ps1"),
+        "SECURITY.md": read(ROOT / "SECURITY.md"),
+        "README.md": read(ROOT / "README.md"),
+        ".env.example": read(ROOT / ".env.example"),
     }
     for file_name, text in files.items():
         if APP_VERSION not in text:
             fail(f"versión {APP_VERSION} ausente en {file_name}")
     ok(f"versión {APP_VERSION} coherente en ficheros activos")
+
+
+def test_windows_dependency_markers() -> None:
+    marker = 'uvloop==0.22.1 ; sys_platform != "win32"'
+    for rel in ("backend/requirements.in", "backend/requirements.txt"):
+        if marker not in read(ROOT / rel):
+            fail(f"{rel} debe excluir uvloop en Windows con el marcador de plataforma")
+    ok("uvloop mantiene el marcador que evita instalaciones imposibles en Windows")
+
+
+def test_installers_keep_host_and_bundled_profiles() -> None:
+    sh = read(ROOT / "instalar.sh")
+    bat = read(ROOT / "instalar.bat")
+    ps1 = read(ROOT / "tools" / "windows" / "enforce-local-config.ps1")
+    if "http://ollama:11434" not in sh or "bundled" not in sh:
+        fail("instalar.sh no conserva el fallback bundled")
+    if "http://ollama:11434" not in ps1 or "bundled" not in ps1:
+        fail("tools/windows/enforce-local-config.ps1 no conserva el fallback bundled")
+    if "bundled" not in bat:
+        fail("instalar.bat no conserva el fallback bundled")
+    if 'ollama pull "$MODELO_BASE"' not in sh:
+        fail("instalar.sh no prepara el modelo del perfil bundled")
+    if 'ollama pull "!MODELO_BASE!"' not in bat:
+        fail("instalar.bat no prepara el modelo del perfil bundled")
+    ok("instaladores conservan perfiles host/bundled y preparan el modelo")
 
 
 def test_shutdown_button_policy() -> None:
@@ -182,6 +215,8 @@ if __name__ == "__main__":
     test_public_env_does_not_expose_dangerous_flags()
     test_dockerignore_minimal_context()
     test_version_coherence()
+    test_windows_dependency_markers()
+    test_installers_keep_host_and_bundled_profiles()
     test_shutdown_button_policy()
     test_offline_structure_inside_repo()
     print("\nComprobaciones estáticas de repositorio superadas.")

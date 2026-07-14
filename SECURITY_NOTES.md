@@ -1,6 +1,6 @@
-# Notas de seguridad de la release v0.7.0
+# Notas de seguridad de la release v0.7.1
 
-Fecha: 2026-06-15
+Fecha: 2026-07-14
 
 ## Criterio de aceptación
 
@@ -11,11 +11,16 @@ Para publicar una build local de PlumA se aplica el siguiente umbral mínimo:
 - 0 vulnerabilidades medias corregibles.
 - Las vulnerabilidades bajas o sin versión corregida deben quedar documentadas y mitigadas por diseño.
 
-## Resultado que motivó v0.7.0
+## Resultados de v0.7.0 y v0.7.1
 
 En la imagen preliminar `pluma-app:0.6.2-beta`, Docker Scout detectó 87 vulnerabilidades en 28 paquetes: 0 críticas, 2 altas, 8 medias y 77 bajas. Al filtrar solo las vulnerabilidades con versión corregida disponible (`docker scout cves --only-fixed`), el resultado bajó a 5 vulnerabilidades en un único paquete: `pip 25.0.1`.
 
 La versión v0.7.0 corrige ese punto eliminando `pip`, `setuptools` y `wheel` de la imagen final. PlumA no instala paquetes en runtime, por lo que conservar esas herramientas dentro del contenedor no aporta funcionalidad y sí aumenta superficie de ataque.
+
+La versión v0.7.1 actualiza las dependencias Python y corrige los avisos
+PYSEC-2026-2253 a PYSEC-2026-2257 mediante Pillow 12.3.0. El workflow de la
+release finaliza con `pip-audit` sin vulnerabilidades conocidas y Trivy sin
+vulnerabilidades críticas o altas corregibles en la imagen de aplicación.
 
 ## Riesgos residuales esperables
 
@@ -44,16 +49,16 @@ docker compose down
 docker compose build --no-cache app
 
 # Comprobación de vulnerabilidades corregibles
-docker scout cves --only-fixed pluma-app:0.7.0
+docker scout cves --only-fixed pluma-app:0.7.1
 
 # Recomendaciones de imagen base
-docker scout recommendations pluma-app:0.7.0
+docker scout recommendations pluma-app:0.7.1
 ```
 
 Alternativa con Trivy:
 
 ```powershell
-trivy image --ignore-unfixed --severity CRITICAL,HIGH,MEDIUM pluma-app:0.7.0
+trivy image --ignore-unfixed --severity CRITICAL,HIGH,MEDIUM pluma-app:0.7.1
 ```
 
 ## Decisión de diseño sobre OCR

@@ -28,6 +28,9 @@ de la auditoría interna de v0.7.0. Sin cambios funcionales que rompan la API:
   `aquasecurity/trivy-action@v0.36.0`.
 - `x-forwarded-proto` y `x-forwarded-port` se añaden a las cabeceras de proxy
   rechazadas en modo local estricto (completa la lista existente).
+- Se incorpora una comprobación de dependencias en Windows y se fija
+  explícitamente el marcador de plataforma de `uvloop`, evitando que una
+  actualización automática intente instalarlo en Windows.
 
 ### Corregido
 
@@ -37,6 +40,12 @@ de la auditoría interna de v0.7.0. Sin cambios funcionales que rompan la API:
   congelarse mientras se procesa un documento.
 - La ficha técnica de auditoría genera el timestamp con zona horaria
   (`datetime.now().astimezone()`) en lugar de hora local naïve.
+- Scripts de arranque, desinstalación y auditoría alineados con la imagen
+  `pluma-app:0.7.1`.
+- Restaurada la selección automática de perfil: Ollama nativo cuando contiene
+  algún modelo y perfil `bundled` con descarga del modelo base en caso contrario.
+- Documentación de instalación, cumplimiento y seguridad realineada con el
+  comportamiento efectivo de la versión.
 
 ### Añadido
 

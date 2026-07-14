@@ -30,3 +30,21 @@ def test_contexto_docker_minimo():
     assert "!app/" in text
     assert "*.pyc" in text
     assert ".env" in text
+
+
+def test_uvloop_no_se_instala_en_windows():
+    marker = 'uvloop==0.22.1 ; sys_platform != "win32"'
+    assert marker in (ROOT / "backend" / "requirements.in").read_text(encoding="utf-8")
+    assert marker in (ROOT / "backend" / "requirements.txt").read_text(encoding="utf-8")
+
+
+def test_instaladores_conservan_fallback_bundled():
+    sh = (ROOT / "instalar.sh").read_text(encoding="utf-8")
+    bat = (ROOT / "instalar.bat").read_text(encoding="utf-8")
+    ps1 = (ROOT / "tools" / "windows" / "enforce-local-config.ps1").read_text(encoding="utf-8")
+    assert "http://ollama:11434" in sh
+    assert "http://ollama:11434" in ps1
+    for text in (sh, bat, ps1):
+        assert "bundled" in text
+    assert 'ollama pull "$MODELO_BASE"' in sh
+    assert 'ollama pull "!MODELO_BASE!"' in bat
