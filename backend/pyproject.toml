@@ -21,8 +21,8 @@ classifiers = [
 
 dependencies = [
     # Web / API. Mantener estos mínimos alineados con requirements.txt.
-    "fastapi>=0.136.0,<0.139",
-    "uvicorn[standard]>=0.45.0,<0.50",
+    "fastapi>=0.136.0,<0.140",
+    "uvicorn[standard]>=0.45.0,<0.52",
     "starlette>=1.0.0,<1.4",
     "python-multipart>=0.0.26,<0.1",
     "httpx>=0.28.1,<0.29",
