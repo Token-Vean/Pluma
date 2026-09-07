@@ -73,6 +73,12 @@ se tocan. Todo lo que sigue es endurecimiento o actualización de dependencias.
   seguridad del procesamiento figuran en `docker-compose.yml` como valor
   literal y no como `${VAR:-...}`, de modo que una regresión que los devuelva a
   sustitución desde `.env` rompa CI en lugar de pasar inadvertida.
+- `tests/test_release_configuration.py` sustituye la aserción sobre
+  `PERMITIR_APAGADO_UI` —que esperaba la sustitución `${PERMITIR_APAGADO_UI:-false}`—
+  por dos pruebas nuevas: `test_controles_seguridad_no_configurables_desde_env()`
+  verifica los cinco literales en `docker-compose.yml`, y
+  `test_env_example_no_declara_controles_seguridad()` impide que `.env.example`
+  vuelva a declararlos como si surtieran efecto.
 - `test_version_coherence()` cubre ahora también
   `.github/workflows/security-checks.yml`, `backend/Dockerfile` y
   `backend/pyproject.toml`. El workflow quedaba fuera y era el caso con
@@ -83,6 +89,10 @@ se tocan. Todo lo que sigue es endurecimiento o actualización de dependencias.
 
 ### Documentado
 
+- `.env.example` deja de declarar las cinco variables de seguridad como
+  configurables y pasa a documentarlas como valores en vigor fijados en
+  `docker-compose.yml`, con la explicación de por qué. Antes inducía a pensar
+  que definirlas en `.env` surtía efecto.
 - `backend/requirements.txt`: se hace constar que la transitiva no está cerrada
   —faltan al menos `sniffio` y `colorama`— y que la reproducibilidad completa
   requiere regenerar el fichero con `pip-compile` según `HASHES.md`.

@@ -16,11 +16,46 @@ def test_compose_publica_solo_loopback():
     assert int(port["target"]) == 8081
 
 
-def test_apagado_ui_desactivado_por_defecto():
+# Controles de seguridad del procesamiento. Desde v0.7.2 son valor literal en
+# docker-compose.yml y no sustitución ${VAR:-...}: un .env manipulado o
+# heredado de una instalación anterior con USAR_SANDBOX_PARSERS=false
+# desactivaba el aislamiento en proceso hijo de los parsers de PDF/DOCX/imagen,
+# que es la defensa central frente a entrada no confiable.
+CONTROLES_SEGURIDAD_LITERALES = {
+    "USAR_SANDBOX_PARSERS": "true",
+    "SANDBOX_TIMEOUT_SEGUNDOS": "120",
+    "SANDBOX_MEMORIA_MB": "1536",
+    "INCLUIR_HASH_DOCUMENTO_AUDITORIA": "true",
+    "PERMITIR_APAGADO_UI": "false",
+}
+
+
+def test_controles_seguridad_no_configurables_desde_env():
     data = yaml.safe_load((ROOT / "docker-compose.yml").read_text(encoding="utf-8"))
     env = data["services"]["app"]["environment"]
-    assert env["PERMITIR_APAGADO_UI"] == "${PERMITIR_APAGADO_UI:-false}"
-    assert "PERMITIR_APAGADO_UI=false" in (ROOT / ".env.example").read_text(encoding="utf-8")
+    for clave, valor in CONTROLES_SEGURIDAD_LITERALES.items():
+        assert env[clave] == valor, (
+            f"{clave} debe ser literal en docker-compose.yml, no sustituible "
+            f"desde .env; valor actual: {env[clave]!r}"
+        )
+
+
+def test_env_example_no_declara_controles_seguridad():
+    """.env.example no debe hacer creer que estas variables siguen surtiendo efecto."""
+    lineas_activas = [
+        linea.strip()
+        for linea in (ROOT / ".env.example").read_text(encoding="utf-8").splitlines()
+        if linea.strip() and not linea.lstrip().startswith("#")
+    ]
+    for clave in CONTROLES_SEGURIDAD_LITERALES:
+        assert not any(linea.startswith(f"{clave}=") for linea in lineas_activas), (
+            f".env.example declara {clave} como si fuera configurable"
+        )
+
+
+def test_apagado_ui_desactivado_por_defecto():
+    data = yaml.safe_load((ROOT / "docker-compose.yml").read_text(encoding="utf-8"))
+    assert data["services"]["app"]["environment"]["PERMITIR_APAGADO_UI"] == "false"
 
 
 def test_contexto_docker_minimo():
