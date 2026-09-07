@@ -217,7 +217,7 @@ proporcionalidad (RGPD art. 5.1.c).
 
 ### Limitaciones conocidas del despliegue actual
 
-En el estado actual del proyecto (versión 0.7.1), estas
+En el estado actual del proyecto (versión 0.7.2), estas
 limitaciones residuales se reconocen y se revisarán en versiones futuras:
 
 - **El contenedor de Ollama en perfil `bundled` corre como root**

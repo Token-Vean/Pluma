@@ -70,7 +70,7 @@ jobs:
       - name: Trivy image scan
         uses: aquasecurity/trivy-action@v0.36.0
         with:
-          image-ref: 'pluma-app:0.7.1'
+          image-ref: 'pluma-app:0.7.2'
           format: 'table'
           severity: 'CRITICAL,HIGH'
           ignore-unfixed: true

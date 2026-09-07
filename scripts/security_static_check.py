@@ -144,6 +144,16 @@ def test_version_coherence() -> None:
     files = {
         "backend/app/version.py": read(ROOT / "backend" / "app" / "version.py"),
         "docker-compose.yml": read(ROOT / "docker-compose.yml"),
+        # El workflow escanea con Trivy la imagen que construye el compose. Si
+        # el tag se queda atrás, `docker compose build app` produce
+        # pluma-app:<nueva> y Trivy busca pluma-app:<vieja>: el job falla al no
+        # encontrar la imagen en local y acaba intentando descargarla de Docker
+        # Hub. Se comprueba aquí para que la incoherencia salte antes de CI.
+        ".github/workflows/security-checks.yml": read(
+            ROOT / ".github" / "workflows" / "security-checks.yml"
+        ),
+        "backend/Dockerfile": read(ROOT / "backend" / "Dockerfile"),
+        "backend/pyproject.toml": read(ROOT / "backend" / "pyproject.toml"),
         "frontend/static/app.js": read(ROOT / "frontend" / "static" / "app.js"),
         "frontend/static/index.html": read(ROOT / "frontend" / "static" / "index.html"),
         "iniciar.bat": read(ROOT / "iniciar.bat"),

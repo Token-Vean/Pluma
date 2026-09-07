@@ -73,6 +73,13 @@ se tocan. Todo lo que sigue es endurecimiento o actualización de dependencias.
   seguridad del procesamiento figuran en `docker-compose.yml` como valor
   literal y no como `${VAR:-...}`, de modo que una regresión que los devuelva a
   sustitución desde `.env` rompa CI en lugar de pasar inadvertida.
+- `test_version_coherence()` cubre ahora también
+  `.github/workflows/security-checks.yml`, `backend/Dockerfile` y
+  `backend/pyproject.toml`. El workflow quedaba fuera y era el caso con
+  consecuencia real: escanea con Trivy la imagen que construye el compose, así
+  que un tag desincronizado hace que `docker compose build app` produzca
+  `pluma-app:<nueva>` mientras Trivy busca `pluma-app:<vieja>`, el job no la
+  encuentra en local y termina intentando descargarla de Docker Hub.
 
 ### Documentado
 

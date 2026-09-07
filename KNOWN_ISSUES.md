@@ -1,7 +1,7 @@
 # Problemas conocidos y riesgos residuales
 
 Este documento recoge los problemas conocidos de PlumA en su versión
-**0.7.1**. Está pensado para que cualquier persona que evalúe la
+**0.7.2**. Está pensado para que cualquier persona que evalúe la
 herramienta para un piloto, una auditoría, o un despliegue controlado,
 sepa de antemano qué limitaciones existen.
 
@@ -14,7 +14,7 @@ Este fichero describe únicamente el estado vigente. El histórico de
 problemas resueltos en versiones anteriores está en `CHANGELOG.md` y en
 las notas de cada release de GitHub.
 
-## Pendientes y riesgos residuales — v0.7.1
+## Pendientes y riesgos residuales — v0.7.2
 
 ### Modelo de amenaza CSRF
 
@@ -232,7 +232,7 @@ con `OLLAMA_HOST=127.0.0.1`.
 ### Imagen oficial `ollama/ollama` no escaneada
 
 El workflow `.github/workflows/security-checks.yml` ejecuta Trivy sobre
-`pluma-app:0.7.1` (la imagen que construimos). La imagen
+`pluma-app:0.7.2` (la imagen que construimos). La imagen
 `ollama/ollama:0.21.2` que se usa en el perfil bundled no se escanea: es
 upstream y no la construimos nosotros. Los CVEs de Ollama deben
 monitorizarse en sus releases. Mantener la versión fijada en

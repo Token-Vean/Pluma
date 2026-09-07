@@ -277,7 +277,7 @@ Estos scripts intentan crear `pluma-texto` desde `gemma4:e2b` y `pluma-vision` d
 
 ## Estado del proyecto
 
-**Versión 0.7.1 — mantenimiento y hardening.** Esta versión está pensada para
+**Versión 0.7.2 — mantenimiento y hardening.** Esta versión está pensada para
 evaluación por archiveros, formación, demostraciones y entornos de
 prueba controlados. **No es apta para producción** sin auditoría previa
 y sin las acciones que se describen en `SECURITY_HARDENING.md`
