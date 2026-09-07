@@ -1,6 +1,6 @@
 [project]
 name = "pluma"
-version = "0.7.1"
+version = "0.7.2"
 description = "Asistente de descripción archivística asistida por IA local"
 readme = "../README.md"
 requires-python = ">=3.11"
@@ -31,7 +31,7 @@ dependencies = [
     "pyyaml>=6.0.3,<7",
 
     # Procesamiento de documentos
-    "pypdf>=6.10.2,<7",
+    "pypdf>=6.16.1,<7",
     "pypdfium2>=5.7.1,<6",
     "python-docx>=1.2.0,<2",
     "Pillow>=12.3.0,<13",

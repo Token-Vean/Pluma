@@ -7,6 +7,20 @@
 #
 # Actualización recomendada: ejecutar `pip list --outdated` y `pip-audit`
 # antes de cada release, subir versiones, volver a probar.
+#
+# PENDIENTE (v0.7.2): este fichero está escrito a mano y la transitiva NO está
+# cerrada. Faltan al menos `sniffio` (requerido por anyio, que a su vez lo es
+# de httpx y starlette) y `colorama` (parte de uvicorn[standard] en Windows,
+# donde el workflow tiene un job dedicado). pip las instala igualmente, pero
+# resolviéndolas libremente en cada build, así que la reproducibilidad que
+# promete la cabecera no se cumple del todo y esas dos quedan fuera del
+# alcance de pip-audit sobre este fichero.
+#
+# Regenerar con pip-compile desde requirements.in en una máquina con red
+# (procedimiento completo en HASHES.md):
+#
+#     pip-compile --generate-hashes --output-file requirements.txt requirements.in
+#
 # =============================================================================
 annotated-doc==0.0.4
 annotated-types==0.7.0
@@ -23,7 +37,7 @@ lxml==6.1.0
 pillow==12.3.0
 pydantic==2.13.3
 pydantic-core==2.46.3
-pypdf==6.13.3
+pypdf==6.16.1
 pypdfium2==5.10.1
 python-docx==1.2.0
 python-dotenv==1.2.2

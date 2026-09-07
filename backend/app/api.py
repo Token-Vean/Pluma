@@ -343,7 +343,12 @@ def _combinar_documentos(docs: list[router_entrada.DocumentoProcesado]) -> route
     tipos: set[str] = set()
 
     for i, doc in enumerate(docs, start=1):
-        nombre = doc.nombre_original or f"archivo_{i}"
+        # El nombre llega del fichero subido y se incrusta como etiqueta en el
+        # prompt (ver el bloque "[Archivo i de n: ...]" más abajo): se sanea
+        # antes de usarlo, igual que en el OCR local.
+        nombre = extractor.etiqueta_segura(
+            doc.nombre_original, defecto=f"archivo_{i}"
+        )
         nombres.append(nombre)
         rutas.add(doc.ruta)
         tipos.add(doc.tipo_mime)

@@ -9,7 +9,7 @@ except Exception:  # pragma: no cover
 
 ROOT = Path(__file__).resolve().parents[1]
 
-APP_VERSION = "0.7.1"
+APP_VERSION = "0.7.2"
 
 
 def fail(msg: str) -> None:
@@ -77,11 +77,21 @@ def test_compose_local_locked() -> None:
     if p.get("host_ip") != "127.0.0.1" or str(p.get("published")) != "8082" or int(p.get("target")) != 8081:
         fail(f"puerto inseguro o inesperado en app: {p}")
     env = app.get("environment") or {}
+    # v0.7.2: los controles de seguridad del procesamiento se comprueban como
+    # literal, no como ${VAR:-...}. Si alguno vuelve a ser sustituible desde
+    # .env, un fichero manipulado o heredado de una instalación anterior podría
+    # desactivarlo: USAR_SANDBOX_PARSERS=false apaga el aislamiento en proceso
+    # hijo de los parsers de PDF/DOCX/imagen, que es la defensa central frente
+    # a entrada no confiable.
     expected = {
         "PLUMA_STRICT_LOCAL": "true",
         "ALLOW_REMOTE_OLLAMA": "false",
         "ALLOW_NETWORK_EXPOSURE": "false",
-        "PERMITIR_APAGADO_UI": "${PERMITIR_APAGADO_UI:-false}",
+        "USAR_SANDBOX_PARSERS": "true",
+        "SANDBOX_TIMEOUT_SEGUNDOS": "120",
+        "SANDBOX_MEMORIA_MB": "1536",
+        "INCLUIR_HASH_DOCUMENTO_AUDITORIA": "true",
+        "PERMITIR_APAGADO_UI": "false",
     }
     for key, expected_value in expected.items():
         if env.get(key) != expected_value:

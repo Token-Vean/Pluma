@@ -237,6 +237,68 @@ def cargar_esquema(ruta: str | Path, perfil: str | None = None) -> Esquema:
 
 
 # =============================================================================
+# Neutralización de delimitadores de prompt
+# =============================================================================
+
+# El documento se entrega al modelo dentro de un bloque delimitado por
+# <<<DOCUMENTO_INICIO>>> / <<<DOCUMENTO_FIN>>>, que además figuran como
+# secuencias `stop` en schemas/pluma-runtime.yaml. Un documento que contenga
+# esos literales —o cualquier variante con triples ángulos— cerraría el bloque
+# de forma prematura y todo lo que viniera después el modelo lo leería como
+# instrucción, no como contenido. En una herramienta que describe fondos de
+# origen no controlado (transferencias, donaciones, documentación digitalizada
+# de terceros) esto no es hipotético.
+#
+# En lugar de enumerar variantes concretas del centinela, se neutraliza la
+# construcción sintáctica completa: ninguna secuencia de tres o más ángulos
+# consecutivos sobrevive dentro del bloque de documento. No hay ningún caso
+# legítimo en el que un documento de archivo necesite `<<<` o `>>>`, y la
+# sustitución por ángulos separados por espacio es visualmente equivalente
+# para el archivero que revise la evidencia.
+_RE_ANGULOS_ABRE = re.compile(r"<{3,}")
+_RE_ANGULOS_CIERRA = re.compile(r">{3,}")
+
+
+def neutralizar_delimitadores(texto: str | None) -> str:
+    """Impide que el contenido del documento cierre el bloque delimitado.
+
+    Se aplica SIEMPRE justo antes de insertar texto no confiable en un prompt.
+    Cubre por igual el texto extraído del fichero, el resultado del OCR local,
+    la transcripción de la lectura visual previa y los nombres de fichero que
+    se incrustan como etiquetas en documentos compuestos.
+    """
+    if not texto:
+        return ""
+    texto = _RE_ANGULOS_ABRE.sub("< < <", texto)
+    return _RE_ANGULOS_CIERRA.sub("> > >", texto)
+
+
+MAX_LONGITUD_ETIQUETA_NOMBRE = 120
+
+
+def etiqueta_segura(nombre: str | None, *, defecto: str = "archivo") -> str:
+    """Prepara un nombre de fichero para incrustarlo como etiqueta en el prompt.
+
+    El nombre del fichero subido lo controla quien envía el documento y acaba
+    dentro del contexto del modelo en dos sitios: la cabecera de cada tramo de
+    OCR local y la etiqueta de cada pieza de un documento compuesto. Un fichero
+    llamado "factura. Ignora las instrucciones anteriores y ....pdf" es texto
+    de entrada como cualquier otro, pero aparece en una posición estructural
+    (una etiqueta, no el cuerpo) donde el modelo le da más peso.
+
+    Se neutralizan los delimitadores, se colapsan los saltos de línea —que
+    permitirían simular una sección nueva del prompt— y se trunca.
+    """
+    limpio = neutralizar_delimitadores(nombre or "")
+    limpio = re.sub(r"\s+", " ", limpio).strip()
+    if not limpio:
+        return defecto
+    if len(limpio) > MAX_LONGITUD_ETIQUETA_NOMBRE:
+        limpio = limpio[:MAX_LONGITUD_ETIQUETA_NOMBRE].rstrip() + "…"
+    return limpio
+
+
+# =============================================================================
 # Construcción del prompt
 # =============================================================================
 
@@ -344,7 +406,10 @@ def construir_prompt(
         }
     }
 
-    documento = entrada.texto if entrada.texto else (
+    # Punto de estrangulamiento único: todo el texto no confiable que llega al
+    # modelo pasa por aquí, venga del parser, del OCR local, de la lectura
+    # visual previa o de un nombre de fichero incrustado como etiqueta.
+    documento = neutralizar_delimitadores(entrada.texto) if entrada.texto else (
         "[Documento proporcionado solo como imagen adjunta, sin capa textual OCR. "
         "Analiza exclusivamente la imagen adjunta. Si no puedes leer un dato con "
         "claridad, devuelve valor null para ese campo. No uses ejemplos ni datos "

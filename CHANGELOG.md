@@ -8,6 +8,78 @@ de cada versión publicada, junto con su manifiesto SHA-256, están adjuntas a
 la entrada correspondiente de
 [GitHub Releases](https://github.com/Token-Vean/Pluma/releases).
 
+## [0.7.2] — 2026-09-07
+
+Versión de mantenimiento derivada de una auditoría de seguridad completa sobre
+la v0.7.1. Sin cambios funcionales: la API, los esquemas y los exportadores no
+se tocan. Todo lo que sigue es endurecimiento o actualización de dependencias.
+
+### Seguridad
+
+- **Los controles de seguridad del procesamiento dejan de ser configurables
+  desde `.env`.** `USAR_SANDBOX_PARSERS`, `SANDBOX_TIMEOUT_SEGUNDOS`,
+  `SANDBOX_MEMORIA_MB`, `INCLUIR_HASH_DOCUMENTO_AUDITORIA` y
+  `PERMITIR_APAGADO_UI` pasan a valor literal en `docker-compose.yml` y se
+  añaden a la lista de claves bloqueadas del saneador (`instalar.sh` y
+  `tools/windows/enforce-local-config.ps1`). El caso crítico era
+  `USAR_SANDBOX_PARSERS`: un `.env` manipulado o heredado de una instalación
+  anterior con el valor a `false` desactivaba el aislamiento en proceso hijo de
+  los parsers de PDF/DOCX/imagen —la defensa central frente a entrada no
+  confiable— sin que nada avisara. Es la misma clase de problema corregida con
+  `OLLAMA_IMAGE` en la v0.7.0.
+- **El contenido del documento ya no puede cerrar el bloque delimitado del
+  prompt.** El texto que se entrega al modelo va entre `<<<DOCUMENTO_INICIO>>>`
+  y `<<<DOCUMENTO_FIN>>>`, pero esos literales no se filtraban del contenido: un
+  documento que los incluyera cerraba el bloque de forma prematura y todo lo que
+  viniera después el modelo lo leía como instrucción y no como contenido. Se
+  añade `extractor.neutralizar_delimitadores()`, que neutraliza la construcción
+  sintáctica completa —ninguna secuencia de tres o más ángulos sobrevive dentro
+  del bloque— y se aplica en `extractor.construir_prompt()` y en
+  `identificador_tipo.detectar()`, que tiene su propio prompt con los mismos
+  centinelas. Las secuencias `stop` de `schemas/pluma-runtime.yaml` no cambian.
+- **Los nombres de fichero se sanean antes de incrustarse en el prompt.** El
+  nombre del fichero subido aparecía sin filtrar en la cabecera de cada tramo de
+  OCR local (`router._ocr_imagenes`) y en la etiqueta de cada pieza de un
+  documento compuesto (`api._combinar_documentos`). Se añade
+  `extractor.etiqueta_segura()`, que neutraliza delimitadores, colapsa saltos de
+  línea —que permitirían simular una sección nueva del prompt— y trunca a 120
+  caracteres.
+- **El cliente HTTP hacia Ollama deja de honrar las variables de proxy del
+  entorno.** `httpx.AsyncClient` usa `trust_env=True` por defecto, de modo que
+  un `HTTP_PROXY`/`ALL_PROXY` heredado del sistema —habitual en equipos
+  corporativos— habría sido el único camino por el que el texto íntegro de un
+  documento podía salir del equipo pese a que `validate_ollama_url()` aprobara
+  la URL. Se añade `llm.cliente_local()` con `trust_env=False` y
+  `follow_redirects=False` explícito, y se usa en las tres llamadas de `llm.py`
+  y en las dos de `bootstrap.py`.
+- **Las cabeceras de seguridad se aplican ahora a todas las respuestas.** El
+  middleware `CabecerasSeguridad` era el más interno de la pila, así que los 403
+  de Host no local, los 403 de CSRF y los 411/413 de límite de cuerpo salían sin
+  CSP, sin `X-Frame-Options`, sin `Referrer-Policy` ni `Permissions-Policy`. Se
+  reordena el registro en `main.py` para que sea el más externo, y el comentario
+  del bloque pasa a describir la pila efectiva real (el anterior afirmaba un
+  orden que no era el que Starlette construía).
+- `pypdf` 6.13.3 → 6.16.1: corrige CVE-2026-71870 (consumo de memoria al
+  analizar entradas `/ToUnicode` con valores anómalos, corregido en 6.15.0),
+  CVE-2026-84310 (tiempos y memoria al recuperar los outlines de un documento
+  con anidamiento reutilizado) y CVE-2026-84311 (ídem al extraer el texto de
+  páginas con muchos objetos XForm). Los tres son de agotamiento de recursos y
+  dos de ellos caen sobre la ruta de `_extraer_texto_pdf()`. Todos publicados
+  después del corte de la v0.7.1.
+
+### Añadido
+
+- `scripts/security_static_check.py` comprueba que los cinco controles de
+  seguridad del procesamiento figuran en `docker-compose.yml` como valor
+  literal y no como `${VAR:-...}`, de modo que una regresión que los devuelva a
+  sustitución desde `.env` rompa CI en lugar de pasar inadvertida.
+
+### Documentado
+
+- `backend/requirements.txt`: se hace constar que la transitiva no está cerrada
+  —faltan al menos `sniffio` y `colorama`— y que la reproducibilidad completa
+  requiere regenerar el fichero con `pip-compile` según `HASHES.md`.
+
 ## [0.7.1] — 2026-07-14
 
 Versión de mantenimiento centrada en seguridad de dependencias y correcciones

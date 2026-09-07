@@ -36,11 +36,19 @@ if (Test-Path -LiteralPath $envPath) {
 # Variables que NO se pueden definir desde fuera: la release pública es
 # estrictamente local. MODELO_NOMBRE y MODELFILE_PATH son obsoletas desde la arquitectura v0.7.0.
 # PLUMA_OLLAMA_MODE y PLUMA_OLLAMA_URL las fija este script.
+#
+# v0.7.2: se añaden los controles de seguridad del procesamiento. El compose
+# los fija como literal; se bloquean aquí también para que un .env heredado de
+# una instalación anterior no deje residuos que induzcan a pensar que siguen
+# siendo configurables. USAR_SANDBOX_PARSERS es el caso crítico: a false
+# desactivaba el aislamiento de proceso de los parsers de PDF/DOCX/imagen.
 $blocked = @(
     'OLLAMA_URL', 'ALLOW_REMOTE_OLLAMA', 'ALLOW_NETWORK_EXPOSURE',
     'PLUMA_STRICT_LOCAL', 'PERFIL', 'COMPOSE_PROFILES',
     'MODELO_NOMBRE', 'MODELFILE_PATH',
-    'PLUMA_OLLAMA_MODE', 'PLUMA_OLLAMA_URL'
+    'PLUMA_OLLAMA_MODE', 'PLUMA_OLLAMA_URL',
+    'USAR_SANDBOX_PARSERS', 'SANDBOX_TIMEOUT_SEGUNDOS', 'SANDBOX_MEMORIA_MB',
+    'INCLUIR_HASH_DOCUMENTO_AUDITORIA', 'PERMITIR_APAGADO_UI'
 )
 
 $kept = New-Object System.Collections.Generic.List[string]

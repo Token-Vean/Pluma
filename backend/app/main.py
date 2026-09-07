@@ -48,18 +48,29 @@ app = FastAPI(
     openapi_url=None,
 )
 
-# Middlewares. Se aplican en orden inverso al de registro: el último
-# añadido es el primero en procesar la petición entrante. Queremos que
-# la protección CSRF se aplique primero (rechaza antes de que nada más
-# procese la petición), y que las cabeceras de seguridad se añadan al
-# final de la respuesta.
-app.add_middleware(CabecerasSeguridad)
+# Middlewares. Starlette inserta cada middleware al principio de la pila, así
+# que EL ÚLTIMO REGISTRADO ES EL MÁS EXTERNO: el primero en ver la petición y
+# el último en tocar la respuesta.
+#
+# Pila efectiva resultante, de fuera hacia dentro:
+#
+#     CabecerasSeguridad        ← ve TODAS las respuestas, incluidos los
+#                                 rechazos generados por los middlewares de
+#                                 abajo (403 de Host, 411/413 de tamaño,
+#                                 403 de CSRF). Antes era el más interno y
+#                                 esos rechazos salían sin CSP ni
+#                                 X-Frame-Options.
+#     ProteccionAccesoLocal     ← rechaza por Host/proxy antes de que nada
+#                                 más procese la petición.
+#     LimiteCuerpoPeticion      ← corta por Content-Length antes del parseo
+#                                 multipart/JSON de FastAPI.
+#     ProteccionCSRF            ← exige Origin local + token sincronizado.
+#
+# El orden de registro es, por tanto, el inverso al orden de ejecución.
 app.add_middleware(ProteccionCSRF)
-# Último middleware registrado = primero en recibir la petición. El límite
-# de cuerpo debe actuar antes del parseo multipart/JSON de FastAPI.
 app.add_middleware(LimiteCuerpoPeticion)
-# Defensa adicional para evitar exposición accidental fuera de localhost.
 app.add_middleware(ProteccionAccesoLocal)
+app.add_middleware(CabecerasSeguridad)
 
 app.include_router(api.router, prefix="/api")
 

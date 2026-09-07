@@ -29,7 +29,7 @@ import zipfile
 from dataclasses import dataclass
 from typing import Literal
 
-from .extractor import Entrada
+from .extractor import Entrada, etiqueta_segura
 from .parser_sandbox import SandboxExecutionError, ejecutar_en_sandbox, sandbox_activo
 
 logger = logging.getLogger(__name__)
@@ -557,15 +557,18 @@ def _ocr_imagenes(imagenes: list[bytes], *, nombre_origen: str = "documento") ->
         return ""
 
     seleccionadas = imagenes[:OCR_MAX_IMAGENES]
+    # El nombre de origen procede del fichero subido y se incrusta como
+    # cabecera de cada tramo del prompt: se sanea antes de usarlo.
+    etiqueta_origen = etiqueta_segura(nombre_origen, defecto="documento")
     partes: list[str] = []
     for i, img in enumerate(seleccionadas, start=1):
         texto = _ocr_imagen_tesseract(img, indice=i)
         if _texto_ocr_suficiente(texto):
-            partes.append(f"[OCR local - {nombre_origen} - página/imagen {i}]\n{texto.strip()}")
+            partes.append(f"[OCR local - {etiqueta_origen} - página/imagen {i}]\n{texto.strip()}")
         elif texto:
             logger.info(
                 "OCR local descartado por baja calidad en %s imagen %d (%d caracteres)",
-                nombre_origen,
+                etiqueta_origen,
                 i,
                 len(texto),
             )

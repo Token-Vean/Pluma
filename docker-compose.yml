@@ -19,6 +19,21 @@
 #   para que `host.docker.internal` resuelva también desde contenedores en
 #   Linux (en Windows/macOS ya resuelve de fábrica).
 #
+# Revisión de endurecimiento v0.7.2:
+# - Los controles de seguridad dejan de leerse de .env y pasan a valor literal
+#   en este fichero: USAR_SANDBOX_PARSERS, SANDBOX_TIMEOUT_SEGUNDOS,
+#   SANDBOX_MEMORIA_MB, INCLUIR_HASH_DOCUMENTO_AUDITORIA y PERMITIR_APAGADO_UI.
+#   El saneador del instalador elimina de .env las variables de red y de
+#   endpoint, pero estas quedaban fuera de esa lista: un .env manipulado o
+#   heredado de una instalación antigua con USAR_SANDBOX_PARSERS=false
+#   desactivaba el aislamiento de proceso de los parsers de PDF/DOCX/imagen
+#   —la defensa central frente a entrada no confiable— sin que nada avisara.
+#   Es la misma clase de problema que se corrigió con OLLAMA_IMAGE en v0.7.0.
+#   Cambiarlas exige ahora editar este fichero: decisión consciente y
+#   auditable, y verificable por security_static_check.py como literal.
+#   Se añaden además a CLAVES_BLOQUEADAS del saneador para que no queden
+#   residuos confusos en .env.
+#
 # Revisión de endurecimiento v0.7.0:
 # - La imagen de Ollama queda fijada en este fichero y deja de leerse de .env
 #   (OLLAMA_IMAGE ya no existe como variable): el saneador del instalador
@@ -88,7 +103,7 @@ services:
     cpus: 4
 
   app:
-    image: pluma-app:0.7.1
+    image: pluma-app:0.7.2
     build: ./backend
     # Imagen construida en local; nunca se descarga de un registro.
     pull_policy: never
@@ -122,7 +137,9 @@ services:
       PLUMA_VISION_MAX_LONG_EDGE: ${PLUMA_VISION_MAX_LONG_EDGE:-1280}
       PLUMA_VISION_JPEG_QUALITY: ${PLUMA_VISION_JPEG_QUALITY:-78}
       OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-10m}
-      USAR_SANDBOX_PARSERS: ${USAR_SANDBOX_PARSERS:-true}
+      # Controles de seguridad: valor literal, NO sustituible desde .env.
+      # Ver el bloque "Revisión de endurecimiento v0.7.2" en la cabecera.
+      USAR_SANDBOX_PARSERS: "true"
       PLUMA_PDF_HIBRIDO_CON_IMAGENES: ${PLUMA_PDF_HIBRIDO_CON_IMAGENES:-false}
       # OCR local previo a la IA: evita llamadas visuales lentas cuando Tesseract
       # puede extraer texto suficiente del documento escaneado.
@@ -133,10 +150,10 @@ services:
       PLUMA_OCR_MAX_IMAGENES: ${PLUMA_OCR_MAX_IMAGENES:-20}
       PLUMA_OCR_MIN_CARACTERES: ${PLUMA_OCR_MIN_CARACTERES:-80}
       PLUMA_OCR_MIN_ALFANUM_RATIO: ${PLUMA_OCR_MIN_ALFANUM_RATIO:-0.35}
-      SANDBOX_TIMEOUT_SEGUNDOS: ${SANDBOX_TIMEOUT_SEGUNDOS:-120}
-      SANDBOX_MEMORIA_MB: ${SANDBOX_MEMORIA_MB:-1536}
-      INCLUIR_HASH_DOCUMENTO_AUDITORIA: ${INCLUIR_HASH_DOCUMENTO_AUDITORIA:-true}
-      PERMITIR_APAGADO_UI: ${PERMITIR_APAGADO_UI:-false}
+      SANDBOX_TIMEOUT_SEGUNDOS: "120"
+      SANDBOX_MEMORIA_MB: "1536"
+      INCLUIR_HASH_DOCUMENTO_AUDITORIA: "true"
+      PERMITIR_APAGADO_UI: "false"
       OLLAMA_NUM_CTX: ${OLLAMA_NUM_CTX:-8192}
       OLLAMA_NUM_PREDICT: ${OLLAMA_NUM_PREDICT:-4096}
       MAX_LONGITUD_TEXTO_EXTRAIDO: ${MAX_LONGITUD_TEXTO_EXTRAIDO:-800000}

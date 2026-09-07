@@ -101,7 +101,7 @@ async def preparar() -> None:
 async def _esperar_ollama(intentos: int = 30, espera: float = 2.0) -> None:
     estado.update(fase="esperando_ollama", mensaje="Esperando al motor de IA local...")
 
-    async with httpx.AsyncClient(timeout=_timeout_rapido()) as cliente:
+    async with llm.cliente_local(_timeout_rapido()) as cliente:
         for _ in range(intentos):
             try:
                 r = await cliente.get(f"{OLLAMA_URL}/api/tags")
@@ -122,7 +122,7 @@ async def _esperar_ollama(intentos: int = 30, espera: float = 2.0) -> None:
 # =============================================================================
 
 async def _listar_modelos() -> list[str]:
-    async with httpx.AsyncClient(timeout=_timeout_rapido()) as cliente:
+    async with llm.cliente_local(_timeout_rapido()) as cliente:
         r = await cliente.get(f"{OLLAMA_URL}/api/tags")
         r.raise_for_status()
         modelos = []

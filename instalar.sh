@@ -65,9 +65,19 @@ if [[ ! -f .env && -f .env.example ]]; then
 fi
 
 # Claves prohibidas/obsoletas que se eliminan del .env si aparecen.
+# Claves que el usuario no puede fijar desde .env. Dos grupos:
+#   - Red y endpoint: impiden convertir PlumA en servicio publicado o
+#     apuntarla a un Ollama remoto.
+#   - Controles de seguridad del procesamiento: el sandbox de parsers y sus
+#     límites, el hash de auditoría y el apagado desde la interfaz. Desde
+#     v0.7.2 el compose los fija como literal; se listan aquí para que un
+#     .env heredado de una instalación anterior no deje residuos que
+#     induzcan a pensar que siguen siendo configurables.
 CLAVES_BLOQUEADAS="OLLAMA_URL ALLOW_REMOTE_OLLAMA ALLOW_NETWORK_EXPOSURE \
 PLUMA_STRICT_LOCAL PERFIL COMPOSE_PROFILES MODELO_NOMBRE MODELFILE_PATH \
-PLUMA_OLLAMA_MODE PLUMA_OLLAMA_URL"
+PLUMA_OLLAMA_MODE PLUMA_OLLAMA_URL USAR_SANDBOX_PARSERS \
+SANDBOX_TIMEOUT_SEGUNDOS SANDBOX_MEMORIA_MB \
+INCLUIR_HASH_DOCUMENTO_AUDITORIA PERMITIR_APAGADO_UI"
 
 # Recorta espacios al inicio y final de una cadena (equivalente a .strip()).
 recortar(){

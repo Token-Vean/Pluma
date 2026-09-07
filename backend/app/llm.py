@@ -95,6 +95,35 @@ validate_ollama_url(OLLAMA_URL)
 
 
 # -----------------------------------------------------------------------------
+# Cliente HTTP local
+# -----------------------------------------------------------------------------
+
+def cliente_local(timeout: httpx.Timeout) -> httpx.AsyncClient:
+    """Crea el cliente HTTP usado para hablar con Ollama.
+
+    Dos ajustes deliberados frente a los valores por defecto de httpx:
+
+    - ``trust_env=False``. Por defecto httpx honra HTTP_PROXY / HTTPS_PROXY /
+      ALL_PROXY del entorno. En una herramienta que garantiza procesamiento
+      local, un proxy heredado del sistema (típico en equipos corporativos)
+      sería el único camino por el que el texto íntegro de un documento podría
+      salir del equipo pese a que ``validate_ollama_url()`` haya aprobado la
+      URL. El destino ya está restringido a loopback/servicio interno; no hay
+      ningún caso legítimo en el que deba atravesar un proxy.
+    - ``follow_redirects=False``. Es el valor por defecto actual de httpx, pero
+      se explicita para que un Ollama comprometido o suplantado no pueda
+      redirigir la petición a otro host, y para que un cambio futuro de la
+      librería no relaje la garantía en silencio.
+    """
+    return httpx.AsyncClient(
+        timeout=timeout,
+        trust_env=False,
+        follow_redirects=False,
+    )
+
+
+
+# -----------------------------------------------------------------------------
 # Carga perezosa del system prompt y parámetros desde YAML
 # -----------------------------------------------------------------------------
 
@@ -450,7 +479,7 @@ async def generar(
             "Llamada visual rápida a Ollama por /api/chat modelo=%s imagenes=%d num_ctx=%s num_predict=%s format_json_nativo=false",
             modelo_final, len(imagenes_optimizadas), opciones_vision.get("num_ctx"), opciones_vision.get("num_predict"),
         )
-        async with httpx.AsyncClient(timeout=TIMEOUT_VISION) as cliente:
+        async with cliente_local(TIMEOUT_VISION) as cliente:
             return await _post_chat(cliente, payload_chat)
 
     modo_json = OLLAMA_JSON_MODE if formato_json else "off"
@@ -469,7 +498,7 @@ async def generar(
     if usar_json_nativo:
         payload["format"] = "json"
 
-    async with httpx.AsyncClient(timeout=TIMEOUT) as cliente:
+    async with cliente_local(TIMEOUT) as cliente:
         if not usar_json_nativo:
             return await _post_generate(cliente, payload)
 
@@ -509,7 +538,7 @@ async def generar(
 
 async def modelos_disponibles() -> list[str]:
     """Lista los modelos descargados localmente en el Ollama nativo/local."""
-    async with httpx.AsyncClient(timeout=TIMEOUT) as cliente:
+    async with cliente_local(TIMEOUT) as cliente:
         resp = await cliente.get(f"{OLLAMA_URL}/api/tags")
         resp.raise_for_status()
         modelos = []

@@ -23,6 +23,7 @@ from pathlib import Path
 import yaml
 
 from . import llm
+from .extractor import neutralizar_delimitadores
 
 logger = logging.getLogger(__name__)
 
@@ -155,7 +156,9 @@ async def detectar(
 
     prompt = _PROMPT_DETECCION.format(
         catalogo=_catalogo_compacto(catalogo),
-        documento=documento,
+        # Mismo bloque delimitado que en extractor.construir_prompt: el
+        # contenido del documento no puede cerrarlo.
+        documento=neutralizar_delimitadores(documento),
     )
 
     try:
