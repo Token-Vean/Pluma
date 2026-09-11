@@ -185,8 +185,25 @@ Variables principales en `.env`:
   defecto: `8192` tokens.
 - `OLLAMA_NUM_PREDICT`: longitud máxima de respuesta del modelo. Valor
   por defecto: `4096` tokens.
+- `PLUMA_CARACTERES_POR_TOKEN`: densidad estimada para calcular cuánto
+  documento cabe en la ventana. Valor por defecto: `4.0`.
+- `PLUMA_RESERVA_SALIDA_TOKENS`: tokens que se dejan libres para la
+  respuesta en ese cálculo. Valor por defecto: `1024`.
 - `MAX_LONGITUD_VALOR_LLM`: longitud máxima admitida para cada valor
   propuesto por el modelo. Valor por defecto: `50000` caracteres.
+
+En la ventana de contexto tienen que caber a la vez el system prompt, las
+instrucciones de la norma, el documento y la respuesta. Las instrucciones
+de ISAD(G) esencial ya ocupan del orden de 2.400-3.200 tokens, así que con
+`OLLAMA_NUM_CTX=4096` queda sitio para poco más de una página. Cuando el
+prompt no cabe, Ollama descarta su principio sin devolver error y el modelo
+responde sin instrucciones. Para evitarlo, PlumA estima el espacio
+disponible y, si el documento no cabe, envía su principio y su final con
+una marca de omisión; si las métricas de Ollama revelan que aun así hubo
+truncado, repite la llamada con un recorte mayor. En ambos casos lo indica
+en las advertencias del análisis y en la ficha técnica
+(`contexto_modelo`). Las evidencias se siguen verificando contra el texto
+completo.
 
 Aumentar estos valores puede mejorar la precisión en documentos largos,
 pero también incrementa consumo de memoria, tiempo de respuesta y carga

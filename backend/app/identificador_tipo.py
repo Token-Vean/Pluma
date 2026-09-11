@@ -23,9 +23,12 @@ from pathlib import Path
 import yaml
 
 from . import llm
-from .extractor import neutralizar_delimitadores
+from .extractor import ajustar_documento_a_contexto, neutralizar_delimitadores
 
 logger = logging.getLogger(__name__)
+
+# Tokens reservados para la respuesta de la detección: un JSON de tres claves.
+RESERVA_SALIDA_DETECCION = 256
 
 
 # =============================================================================
@@ -153,14 +156,31 @@ async def detectar(
     # identificadores suelen estar en las primeras y últimas líneas).
     if len(documento) > 4000:
         documento = documento[:2500] + "\n[...]\n" + documento[-1500:]
+    # Mismo bloque delimitado que en extractor.construir_prompt: el contenido
+    # del documento no puede cerrarlo.
+    documento = neutralizar_delimitadores(documento)
 
-    prompt = _PROMPT_DETECCION.format(
-        catalogo=_catalogo_compacto(catalogo),
-        # Mismo bloque delimitado que en extractor.construir_prompt: el
-        # contenido del documento no puede cerrarlo.
-        documento=neutralizar_delimitadores(documento),
-    )
+    catalogo_txt = _catalogo_compacto(catalogo)
+    if texto:
+        # El catálogo y el system prompt ya ocupan buena parte de una ventana
+        # de 4096 tokens: el tope fijo de 4000 caracteres no garantiza que el
+        # prompt quepa. Si no cabe, Ollama descartaría el principio (las
+        # reglas y el catálogo) y la detección elegiría a ciegas.
+        presupuesto = llm.presupuesto_documento(
+            _PROMPT_DETECCION.format(catalogo=catalogo_txt, documento=""),
+            imagenes=len(imagenes or []),
+            reserva_salida=RESERVA_SALIDA_DETECCION,
+        )
+        documento, recortado = ajustar_documento_a_contexto(documento, presupuesto.caracteres)
+        if recortado:
+            logger.info(
+                "Detección de tipo: documento reducido a %d caracteres (num_ctx=%d)",
+                len(documento), presupuesto.num_ctx,
+            )
 
+    prompt = _PROMPT_DETECCION.format(catalogo=catalogo_txt, documento=documento)
+
+    diagnostico: dict = {}
     try:
         try:
             respuesta = await llm.generar(
@@ -169,23 +189,33 @@ async def detectar(
                 imagenes=imagenes,
                 formato_json=True,
                 temperatura=0.0,   # determinismo máximo para identificación
+                diagnostico=diagnostico,
             )
         except Exception as e:
             if texto and imagenes:
                 logger.warning(
                     "Fallo en detección multimodal; reintentando solo con texto: %s", e
                 )
+                diagnostico = {}
                 respuesta = await llm.generar(
                     prompt=prompt,
                     modelo=modelo,
                     imagenes=None,
                     formato_json=True,
                     temperatura=0.0,
+                    diagnostico=diagnostico,
                 )
             else:
                 raise
     except Exception as e:
         logger.warning("Fallo en detección de tipo: %s", e)
+        return None
+
+    estado = llm.evaluar_contexto(diagnostico)
+    if estado in llm.ESTADOS_DESBORDAMIENTO:
+        # Un tipo elegido sin ver el catálogo inyectaría instrucciones
+        # equivocadas en la extracción: mejor seguir sin plantilla.
+        logger.warning("Detección de tipo descartada por desbordamiento de contexto (%s)", estado)
         return None
 
     respuesta = llm.extraer_json_texto(respuesta)

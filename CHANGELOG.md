@@ -8,6 +8,57 @@ de cada versión publicada, junto con su manifiesto SHA-256, están adjuntas a
 la entrada correspondiente de
 [GitHub Releases](https://github.com/Token-Vean/Pluma/releases).
 
+## [Sin publicar]
+
+### Corregido
+
+- **Propuestas vacías sin explicación cuando el prompt no cabía en la ventana
+  de contexto.** Con `OLLAMA_NUM_CTX=4096` —el valor de `.env.example`— las
+  instrucciones de ISAD(G) esencial y un documento de más de una página
+  superaban la ventana. Ollama no devuelve error en ese caso: descarta el
+  principio del prompt (system prompt, reglas y campos) y responde 200 OK. El
+  modelo, sin instrucciones, devolvía JSON degradado y todos los campos
+  aparecían como «Sin evidencia en el documento», sin ninguna advertencia.
+  - `llm.presupuesto_documento()` estima cuántos caracteres de documento caben
+    y `extractor.ajustar_documento_a_contexto()` envía principio (70 %) y final
+    (30 %) con una marca de omisión cuando no caben todos.
+  - `llm.generar()` acepta `diagnostico` y lo rellena con las métricas de
+    Ollama (`prompt_eval_count`, `eval_count`, `done_reason`, `thinking`).
+    `llm.evaluar_contexto()` detecta prompt truncado, contexto agotado durante
+    la generación y salida cortada por `num_predict`. Si hubo truncado o
+    contexto agotado, la llamada se repite una vez con un recorte prudente.
+  - La detección de tipo documental aplica el mismo presupuesto y descarta el
+    resultado si la llamada desbordó, en lugar de inyectar un tipo elegido sin
+    ver el catálogo.
+- **`parsear_respuesta()` ya no descarta en silencio respuestas degradadas.**
+  Acepta los campos en la raíz sin el envoltorio `campos`, los campos como
+  lista y las claves por id o por nombre normalizado (las claves exactas se
+  asignan primero, para que un alias no robe el valor de otro campo). Avisa
+  cuando la respuesta no contiene ninguno de los campos pedidos y cuando
+  ninguno trae valor. Estos avisos no disparan el reintento por JSON inválido,
+  que no arregla un desbordamiento.
+
+### Añadido
+
+- Advertencias consolidadas de contexto: documento recortado (con caracteres
+  enviados sobre el total), ventana insuficiente para las instrucciones,
+  desbordamiento no resuelto, salida cortada y respuesta solo con razonamiento.
+- Bloque `contexto_modelo` en la ficha técnica de auditoría: ventanas
+  configuradas, llamadas, recortes, reintentos y desbordamientos. Solo
+  metadatos, sin contenido documental.
+- Variables `PLUMA_CARACTERES_POR_TOKEN` (4.0) y `PLUMA_RESERVA_SALIDA_TOKENS`
+  (1024) en `docker-compose.yml`.
+- `tests/test_contexto_modelo.py`: recorte, lectura de métricas, respuestas
+  degradadas y reintento tras desbordamiento, con un Ollama simulado.
+
+### Documentado
+
+- `.env.example` propone `OLLAMA_NUM_CTX=8192`, alineado con
+  `docker-compose.yml` y el README, y explica qué ocurre si el prompt no cabe.
+  El comentario anterior presentaba 4096 como razonable para documentos
+  medianos, lo que no se sostiene con los prompts actuales.
+- README, «Ajuste de longitud y contexto»: presupuesto, recorte y variables.
+
 ## [0.7.2] — 2026-09-07
 
 Versión de mantenimiento derivada de una auditoría de seguridad completa sobre

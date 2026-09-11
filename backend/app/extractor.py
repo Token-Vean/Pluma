@@ -138,9 +138,122 @@ class Propuesta:
     timestamp: str
     idioma_salida: str = "es"
     advertencias: list[str] = field(default_factory=list)
+    # Resumen técnico de lo ocurrido con la ventana de contexto (sin contenido
+    # documental). Alimenta la ficha técnica de auditoría.
+    contexto: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return asdict(self)
+
+
+def _miles(n: int | None) -> str:
+    return f"{int(n or 0):,}".replace(",", ".")
+
+
+@dataclass
+class InformeContexto:
+    """Registro de lo ocurrido con la ventana de contexto en una petición.
+
+    En modo completo por áreas se hacen varias llamadas al modelo. Cada una
+    anota aquí lo que le ha pasado y `avisos()` lo consolida al final, para
+    que el archivero vea un aviso por problema y no uno por bloque.
+    """
+
+    llamadas: int = 0
+    caracteres_documento: int = 0
+    caracteres_enviados_min: int | None = None
+    num_ctx_restrictivo: int | None = None
+    recortes_preventivos: int = 0
+    reintentos_por_desbordamiento: int = 0
+    desbordamientos_no_resueltos: int = 0
+    instrucciones_no_caben: bool = False
+    num_ctx_insuficiente: int | None = None
+    salidas_cortadas: int = 0
+    num_predict: int | None = None
+    solo_razonamiento: int = 0
+
+    @property
+    def documento_recortado(self) -> bool:
+        return self.caracteres_enviados_min is not None
+
+    def registrar_envio(self, total: int, enviados: int, recortado: bool, num_ctx: int) -> None:
+        self.caracteres_documento = max(self.caracteres_documento, total)
+        if recortado and (
+            self.caracteres_enviados_min is None or enviados < self.caracteres_enviados_min
+        ):
+            self.caracteres_enviados_min = enviados
+            self.num_ctx_restrictivo = num_ctx
+
+    def registrar_llamada(self, diagnostico: dict[str, Any], estado: str | None) -> None:
+        self.llamadas += 1
+        if estado == "limite_salida":
+            self.salidas_cortadas += 1
+            try:
+                self.num_predict = int(diagnostico.get("num_predict") or 0) or self.num_predict
+            except (TypeError, ValueError):
+                pass
+        if diagnostico.get("solo_razonamiento"):
+            self.solo_razonamiento += 1
+
+    def avisos(self) -> list[str]:
+        avisos: list[str] = []
+        if self.instrucciones_no_caben:
+            avisos.append(
+                f"La ventana de contexto del modelo ({self.num_ctx_insuficiente} tokens) no alcanza "
+                "ni para las instrucciones de esta norma y modo con margen para la respuesta. "
+                "Aumente OLLAMA_NUM_CTX (u OLLAMA_VISION_NUM_CTX si el documento va por visión) "
+                "o use el modo esencial; las propuestas no son fiables."
+            )
+        if self.documento_recortado:
+            aviso = (
+                "El documento no cabe entero en la ventana de contexto del modelo "
+                f"({self.num_ctx_restrictivo} tokens): se han enviado su principio y su final, "
+                f"{_miles(self.caracteres_enviados_min)} de {_miles(self.caracteres_documento)} "
+                "caracteres en la llamada más restrictiva. Las propuestas no pueden apoyarse en la "
+                "parte omitida; para documentos largos, aumente OLLAMA_NUM_CTX o divida el documento."
+            )
+            if self.reintentos_por_desbordamiento:
+                aviso += (
+                    " Ollama truncó al menos un intento y PlumA lo repitió con el documento recortado."
+                )
+            avisos.append(aviso)
+        if self.desbordamientos_no_resueltos:
+            avisos.append(
+                "Ollama descartó parte del prompt por falta de contexto y recortar el documento no "
+                f"bastó ({self.desbordamientos_no_resueltos} llamada(s)). Las propuestas afectadas "
+                "no son fiables: aumente OLLAMA_NUM_CTX."
+            )
+        if self.salidas_cortadas:
+            avisos.append(
+                "La respuesta del modelo alcanzó el límite de salida "
+                f"(OLLAMA_NUM_PREDICT={self.num_predict}) en {self.salidas_cortadas} llamada(s) "
+                "y pudo quedar incompleta."
+            )
+        if self.solo_razonamiento:
+            avisos.append(
+                "El modelo devolvió solo razonamiento interno (thinking) y ninguna respuesta. "
+                "Pruebe con otro modelo."
+            )
+        return avisos
+
+    def resumen(self) -> dict[str, Any]:
+        """Metadatos para la ficha técnica. No incluye contenido del documento."""
+        return {
+            "num_ctx_texto": llm.NUM_CTX,
+            "num_ctx_vision": llm.VISION_NUM_CTX,
+            "caracteres_por_token_estimados": llm.CARACTERES_POR_TOKEN,
+            "llamadas_modelo": self.llamadas,
+            "documento_recortado": self.documento_recortado,
+            "caracteres_documento": self.caracteres_documento or None,
+            "caracteres_enviados_min": self.caracteres_enviados_min,
+            "num_ctx_llamada_mas_restrictiva": self.num_ctx_restrictivo,
+            "recortes_preventivos": self.recortes_preventivos,
+            "reintentos_por_desbordamiento": self.reintentos_por_desbordamiento,
+            "desbordamientos_no_resueltos": self.desbordamientos_no_resueltos,
+            "instrucciones_no_caben": self.instrucciones_no_caben,
+            "salidas_cortadas": self.salidas_cortadas,
+            "respuestas_solo_razonamiento": self.solo_razonamiento,
+        }
 
 
 # =============================================================================
@@ -299,6 +412,61 @@ def etiqueta_segura(nombre: str | None, *, defecto: str = "archivo") -> str:
 
 
 # =============================================================================
+# Ajuste del documento a la ventana de contexto
+# =============================================================================
+
+_MARCA_OMISION = (
+    "\n\n[… {omitidos} caracteres del documento omitidos aquí por el límite de la "
+    "ventana de contexto del modelo …]\n\n"
+)
+PROPORCION_PRINCIPIO_RECORTE = 0.7
+_VENTANA_CORTE_LIMPIO = 200
+
+
+def _posicion_corte(texto: str, posicion: int, *, hacia_atras: bool) -> int:
+    """Lleva un punto de corte al espacio en blanco más próximo para no partir palabras."""
+    posicion = max(0, min(len(texto), posicion))
+    if hacia_atras:
+        inicio = max(0, posicion - _VENTANA_CORTE_LIMPIO)
+        tramo = texto[inicio:posicion]
+        indice = max(tramo.rfind(" "), tramo.rfind("\n"), tramo.rfind("\t"))
+        return inicio + indice if indice >= 0 else posicion
+    fin = min(len(texto), posicion + _VENTANA_CORTE_LIMPIO)
+    tramo = texto[posicion:fin]
+    indices = [i for i in (tramo.find(" "), tramo.find("\n"), tramo.find("\t")) if i >= 0]
+    return posicion + min(indices) if indices else posicion
+
+
+def ajustar_documento_a_contexto(documento: str, max_caracteres: int) -> tuple[str, bool]:
+    """Reduce el documento a `max_caracteres` conservando principio y final.
+
+    Se conserva un 70 % de principio y un 30 % de final: en documentación de
+    archivo el principio suele concentrar título, fechas, productor y
+    destinatario, y el final la resolución, las firmas y las diligencias.
+    Entre ambos se inserta una marca explícita para que el modelo sepa que
+    falta texto. Devuelve (documento, recortado).
+
+    La verificación de evidencias sigue haciéndose contra el texto completo.
+    """
+    if not documento or len(documento) <= max_caracteres:
+        return documento, False
+    max_caracteres = max(0, max_caracteres)
+    util = max(0, max_caracteres - len(_MARCA_OMISION.format(omitidos=_miles(len(documento)))))
+    principio = int(util * PROPORCION_PRINCIPIO_RECORTE)
+    final = util - principio
+    corte_principio = _posicion_corte(documento, principio, hacia_atras=True)
+    inicio_final = _posicion_corte(documento, len(documento) - final, hacia_atras=False)
+    if inicio_final <= corte_principio:
+        return documento[:max_caracteres], True
+    omitidos = inicio_final - corte_principio
+    return (
+        documento[:corte_principio].rstrip()
+        + _MARCA_OMISION.format(omitidos=_miles(omitidos))
+        + documento[inicio_final:].lstrip()
+    ), True
+
+
+# =============================================================================
 # Construcción del prompt
 # =============================================================================
 
@@ -364,13 +532,57 @@ entre corchetes NO son valores y está prohibido copiarlos como contenido:
 """
 
 
+_DOCUMENTO_SOLO_IMAGEN = (
+    "[Documento proporcionado solo como imagen adjunta, sin capa textual OCR. "
+    "Analiza exclusivamente la imagen adjunta. Si no puedes leer un dato con "
+    "claridad, devuelve valor null para ese campo. No uses ejemplos ni datos "
+    "plausibles.]"
+)
+
+
+def _documento_para_prompt(
+    entrada: Entrada,
+    max_caracteres_documento: int | None = None,
+) -> tuple[str, bool]:
+    """Texto que va dentro del bloque de documento. Devuelve (texto, recortado).
+
+    Punto de estrangulamiento único: todo el texto no confiable que llega al
+    modelo pasa por aquí, venga del parser, del OCR local, de la lectura
+    visual previa o de un nombre de fichero incrustado como etiqueta.
+    """
+    if not entrada.texto:
+        return _DOCUMENTO_SOLO_IMAGEN, False
+    documento = neutralizar_delimitadores(entrada.texto)
+    if max_caracteres_documento is None:
+        return documento, False
+    return ajustar_documento_a_contexto(documento, max_caracteres_documento)
+
+
 def construir_prompt(
     esquema: Esquema,
     entrada: Entrada,
     filtro_claves: set[str] | None = None,
     idioma_salida: str = "es",
+    max_caracteres_documento: int | None = None,
 ) -> str:
-    """Genera el prompt completo para el LLM."""
+    """Genera el prompt completo para el LLM.
+
+    Con `max_caracteres_documento=None` el documento va íntegro. La extracción
+    real no llama aquí directamente: usa `_llamar_modelo_extraccion()`, que
+    calcula el presupuesto de contexto y vigila el desbordamiento.
+    """
+    documento, _ = _documento_para_prompt(entrada, max_caracteres_documento)
+    return _componer_prompt(esquema, entrada, filtro_claves, idioma_salida, documento)
+
+
+def _componer_prompt(
+    esquema: Esquema,
+    entrada: Entrada,
+    filtro_claves: set[str] | None,
+    idioma_salida: str,
+    documento: str,
+) -> str:
+    """Ensambla el prompt con el texto de documento ya preparado."""
     extraibles = esquema.extraibles(filtro_claves)
     idioma_salida_nombre = nombre_idioma_salida(idioma_salida)
 
@@ -405,16 +617,6 @@ def construir_prompt(
             for el in extraibles
         }
     }
-
-    # Punto de estrangulamiento único: todo el texto no confiable que llega al
-    # modelo pasa por aquí, venga del parser, del OCR local, de la lectura
-    # visual previa o de un nombre de fichero incrustado como etiqueta.
-    documento = neutralizar_delimitadores(entrada.texto) if entrada.texto else (
-        "[Documento proporcionado solo como imagen adjunta, sin capa textual OCR. "
-        "Analiza exclusivamente la imagen adjunta. Si no puedes leer un dato con "
-        "claridad, devuelve valor null para ese campo. No uses ejemplos ni datos "
-        "plausibles.]"
-    )
 
     return f"""{sistema}
 {_PROMPT_PLANTILLA_ESTRUCTURAL}
@@ -513,36 +715,141 @@ async def lectura_visual_previa(imagenes: list[bytes] | None, modelo: str | None
 # Parseo y validación
 # =============================================================================
 
+# Avisos de respuesta degradada. Ninguno contiene "JSON inválido": no deben
+# disparar el reintento por JSON inválido, que no arregla estas situaciones.
+AVISO_SIN_CAMPOS = (
+    "El modelo no devolvió ninguno de los campos solicitados. Suele indicar que el "
+    "prompt no cupo en la ventana de contexto y el modelo perdió las instrucciones, o "
+    "que el modelo elegido no sigue el formato pedido. Revise OLLAMA_NUM_CTX y el "
+    "modelo seleccionado."
+)
+AVISO_SIN_VALORES = (
+    "El modelo no propuso valor para ninguno de los campos solicitados. Si el documento "
+    "tiene contenido legible, revise las demás advertencias, OLLAMA_NUM_CTX y el modelo "
+    "seleccionado."
+)
+AVISO_ESTRUCTURA_ALTERNATIVA = (
+    "El modelo no respetó exactamente la estructura JSON pedida; PlumA ha interpretado "
+    "los campos igualmente. Si se repite, pruebe con otro modelo."
+)
+
+
+def _normalizar_nombre_campo(valor: Any) -> str:
+    texto = unicodedata.normalize("NFKD", str(valor))
+    texto = "".join(c for c in texto if not unicodedata.combining(c)).lower()
+    return re.sub(r"[^a-z0-9.]+", "_", texto).strip("_.")
+
+
+def _alias_elemento(el: ElementoEsquema) -> list[str]:
+    alias = (_normalizar_nombre_campo(x) for x in (el.clave, el.id, el.nombre) if x)
+    return [a for a in dict.fromkeys(alias) if a]
+
+
+def _campos_desde_lista(lista: list[Any]) -> dict[str, Any]:
+    """Convierte [{"clave": "titulo", "valor": ...}, ...] en {"titulo": {...}}."""
+    campos: dict[str, Any] = {}
+    for item in lista:
+        if not isinstance(item, dict):
+            continue
+        for etiqueta in ("clave", "campo", "id", "nombre"):
+            nombre = item.get(etiqueta)
+            if isinstance(nombre, str) and nombre.strip():
+                campos.setdefault(nombre.strip(), item)
+                break
+    return campos
+
+
+def _asignar_campos(
+    extraibles: list[ElementoEsquema],
+    campos_llm: dict[str, Any],
+) -> tuple[dict[str, str], bool]:
+    """Relaciona cada elemento pedido con una clave de la respuesta.
+
+    Primero por clave exacta, para todos los elementos; después por clave, id
+    o nombre normalizados, solo entre las claves que nadie ha reclamado. Así
+    un alias nunca roba el valor que corresponde por clave exacta a otro campo.
+    Devuelve (asignación clave_esquema -> clave_respuesta, hubo_alias).
+    """
+    asignacion = {el.clave: el.clave for el in extraibles if el.clave in campos_llm}
+    usadas = set(asignacion.values())
+    indice: dict[str, str] = {}
+    for clave in campos_llm:
+        normalizada = _normalizar_nombre_campo(clave)
+        if normalizada and clave not in usadas:
+            indice.setdefault(normalizada, clave)
+
+    hubo_alias = False
+    for el in extraibles:
+        if el.clave in asignacion:
+            continue
+        for alias in _alias_elemento(el):
+            candidata = indice.get(alias)
+            if candidata is not None and candidata not in usadas:
+                asignacion[el.clave] = candidata
+                usadas.add(candidata)
+                hubo_alias = True
+                break
+    return asignacion, hubo_alias
+
+
 def parsear_respuesta(
     json_str: str,
     esquema: Esquema,
     filtro_claves: set[str] | None = None,
 ) -> tuple[list[CampoPropuesto], list[str]]:
-    """Parsea el JSON del LLM y valida cada campo contra el esquema."""
+    """Parsea el JSON del LLM y valida cada campo contra el esquema.
+
+    Tolera las degradaciones más frecuentes de los modelos locales (campos en
+    la raíz sin el envoltorio "campos", campos como lista, claves por id o por
+    nombre) y avisa cuando la respuesta no contiene ninguno de los campos
+    pedidos, en lugar de devolver una propuesta vacía en silencio.
+    """
     advertencias: list[str] = []
+    extraibles = esquema.extraibles(filtro_claves)
+    json_valido = True
 
     json_str = llm.extraer_json_texto(json_str)
 
     try:
         data = json.loads(json_str)
-    except json.JSONDecodeError as e:
+    except (json.JSONDecodeError, TypeError) as e:
         logger.error("JSON inválido del modelo: %s", e)
         advertencias.append("El modelo devolvió JSON inválido; se omiten propuestas.")
         data = {"campos": {}}
+        json_valido = False
 
     if not isinstance(data, dict):
         advertencias.append("El modelo no devolvió un objeto JSON; se omiten propuestas.")
         data = {"campos": {}}
+        json_valido = False
 
-    campos_llm = data.get("campos", {})
+    estructura_alternativa = False
+    if "campos" in data:
+        campos_llm = data.get("campos")
+    else:
+        campos_llm = data
+        estructura_alternativa = bool(data)
+    if isinstance(campos_llm, list):
+        campos_llm = _campos_desde_lista(campos_llm)
+        estructura_alternativa = True
     if not isinstance(campos_llm, dict):
         advertencias.append("La clave 'campos' del modelo no era un objeto; se omiten propuestas.")
         campos_llm = {}
+        json_valido = False
+
+    asignacion, hubo_alias = _asignar_campos(extraibles, campos_llm)
+
+    if json_valido and extraibles:
+        if not asignacion:
+            advertencias.append(AVISO_SIN_CAMPOS)
+        elif estructura_alternativa or hubo_alias:
+            advertencias.append(AVISO_ESTRUCTURA_ALTERNATIVA)
 
     propuestos: list[CampoPropuesto] = []
 
-    for el in esquema.extraibles(filtro_claves):
-        bruto = campos_llm.get(el.clave, {})
+    for el in extraibles:
+        clave_respuesta = asignacion.get(el.clave)
+        bruto = campos_llm.get(clave_respuesta, {}) if clave_respuesta is not None else {}
         if not isinstance(bruto, dict):
             advertencias.append(f"{el.clave}: estructura inesperada del modelo; valor omitido.")
             bruto = {}
@@ -600,6 +907,18 @@ def _grupos_claves_por_area(esquema: Esquema, filtro_claves: set[str] | None = N
     return [(area, set(claves)) for area, claves in grupos if claves]
 
 
+_SUFIJO_REINTENTO_JSON = (
+    "\n\nREINTENTO POR JSON INVÁLIDO:\n"
+    "En el intento anterior la salida no pudo parsearse como JSON. "
+    "Devuelve ahora SOLO el objeto JSON solicitado, sin markdown, sin texto previo, "
+    "sin comentarios y sin claves adicionales. No expliques nada."
+)
+
+# Al repetir tras un desbordamiento, el documento se reduce al menos a esta
+# fracción de lo enviado, aunque la estimación diga que cabría más.
+_FRACCION_MAXIMA_REINTENTO = 0.7
+
+
 async def _llamar_modelo_extraccion(
     *,
     entrada: Entrada,
@@ -607,16 +926,111 @@ async def _llamar_modelo_extraccion(
     modelo: str,
     filtro_claves: set[str] | None,
     idioma_salida: str,
-) -> tuple[str, str]:
-    """Construye prompt y llama al modelo para un bloque de campos."""
-    prompt = construir_prompt(esquema, entrada, filtro_claves, idioma_salida)
+    informe: InformeContexto,
+    sufijo: str = "",
+) -> str:
+    """Llama al modelo con el documento ajustado a la ventana de contexto.
+
+    1. Estima el presupuesto con la densidad central y, si el documento no
+       cabe, envía principio y final (recorte preventivo).
+    2. Tras la llamada, lee las métricas de Ollama. Si revelan que el prompt
+       se truncó o que el contexto se agotó, repite una vez con el documento
+       recortado según una estimación prudente o la densidad observada.
+
+    Todo lo ocurrido queda anotado en `informe`.
+    """
+    num_imagenes = len(entrada.imagenes or [])
+    documento_completo = neutralizar_delimitadores(entrada.texto) if entrada.texto else ""
+
+    def _prompt_con(documento: str) -> str:
+        prompt = _componer_prompt(esquema, entrada, filtro_claves, idioma_salida, documento)
+        return prompt.rstrip() + sufijo if sufijo else prompt
+
+    def _preparar(max_caracteres: int) -> tuple[str, str, bool]:
+        if not documento_completo:
+            return _prompt_con(_DOCUMENTO_SOLO_IMAGEN), "", False
+        documento, recortado = ajustar_documento_a_contexto(documento_completo, max_caracteres)
+        return _prompt_con(documento), documento, recortado
+
+    base = _prompt_con("" if documento_completo else _DOCUMENTO_SOLO_IMAGEN)
+    presupuesto = llm.presupuesto_documento(base, imagenes=num_imagenes)
+    if not presupuesto.suficiente:
+        informe.instrucciones_no_caben = True
+        informe.num_ctx_insuficiente = presupuesto.num_ctx
+
+    prompt, documento_enviado, recortado = _preparar(presupuesto.caracteres)
+    if documento_completo:
+        informe.registrar_envio(
+            len(documento_completo), len(documento_enviado), recortado, presupuesto.num_ctx
+        )
+        if recortado:
+            informe.recortes_preventivos += 1
+            logger.info(
+                "Documento recortado preventivamente a %d de %d caracteres (num_ctx=%d)",
+                len(documento_enviado), len(documento_completo), presupuesto.num_ctx,
+            )
+
+    diagnostico: dict[str, Any] = {}
     respuesta = await llm.generar(
         prompt=prompt,
         modelo=modelo,
         imagenes=entrada.imagenes,
         formato_json=True,
+        diagnostico=diagnostico,
     )
-    return prompt, respuesta
+    estado = llm.evaluar_contexto(diagnostico)
+    informe.registrar_llamada(diagnostico, estado)
+    if estado not in llm.ESTADOS_DESBORDAMIENTO:
+        return respuesta
+
+    if len(documento_enviado) <= llm.MIN_CARACTERES_DOCUMENTO:
+        # No hay documento que recortar: lo que no cabe son las instrucciones.
+        informe.desbordamientos_no_resueltos += 1
+        return respuesta
+
+    ratio = (
+        llm.caracteres_por_token_observados(diagnostico)
+        or llm.CARACTERES_POR_TOKEN_PRUDENTE
+    )
+    reintento = llm.presupuesto_documento(
+        base,
+        imagenes=num_imagenes,
+        caracteres_por_token=ratio,
+        reserva_salida=2 * llm.RESERVA_SALIDA_TOKENS,
+    )
+    max_caracteres = min(
+        reintento.caracteres,
+        int(len(documento_enviado) * _FRACCION_MAXIMA_REINTENTO),
+    )
+    prompt, documento_reintento, recortado = _preparar(max_caracteres)
+    informe.reintentos_por_desbordamiento += 1
+    informe.registrar_envio(
+        len(documento_completo), len(documento_reintento), recortado, reintento.num_ctx
+    )
+    logger.warning(
+        "Desbordamiento de contexto (%s); se repite la llamada con %d de %d caracteres de documento",
+        estado, len(documento_reintento), len(documento_completo),
+    )
+
+    diagnostico_reintento: dict[str, Any] = {}
+    try:
+        respuesta_reintento = await llm.generar(
+            prompt=prompt,
+            modelo=modelo,
+            imagenes=entrada.imagenes,
+            formato_json=True,
+            diagnostico=diagnostico_reintento,
+        )
+    except Exception as exc:
+        logger.warning("Falló el reintento tras desbordamiento de contexto: %s", exc)
+        informe.desbordamientos_no_resueltos += 1
+        return respuesta
+
+    estado_reintento = llm.evaluar_contexto(diagnostico_reintento)
+    informe.registrar_llamada(diagnostico_reintento, estado_reintento)
+    if estado_reintento in llm.ESTADOS_DESBORDAMIENTO:
+        informe.desbordamientos_no_resueltos += 1
+    return respuesta_reintento
 
 
 async def _extraer_bloque_campos(
@@ -627,15 +1041,17 @@ async def _extraer_bloque_campos(
     filtro_claves: set[str] | None,
     idioma_salida: str,
     etiqueta: str,
+    informe: InformeContexto,
 ) -> tuple[list[CampoPropuesto], list[str]]:
     """Extrae un bloque de campos y reintenta una vez si el JSON es inválido."""
     try:
-        _, respuesta = await _llamar_modelo_extraccion(
+        respuesta = await _llamar_modelo_extraccion(
             entrada=entrada,
             esquema=esquema,
             modelo=modelo,
             filtro_claves=filtro_claves,
             idioma_salida=idioma_salida,
+            informe=informe,
         )
     except Exception as e:
         logger.exception("Fallo en la llamada al modelo para bloque %s", etiqueta)
@@ -647,19 +1063,14 @@ async def _extraer_bloque_campos(
 
     logger.warning("JSON inválido en bloque %s; reintentando una vez con prompt reforzado", etiqueta)
     try:
-        prompt_base = construir_prompt(esquema, entrada, filtro_claves, idioma_salida)
-        prompt_reintento = (
-            prompt_base.rstrip()
-            + "\n\nREINTENTO POR JSON INVÁLIDO:\n"
-            + "En el intento anterior la salida no pudo parsearse como JSON. "
-            + "Devuelve ahora SOLO el objeto JSON solicitado, sin markdown, sin texto previo, "
-            + "sin comentarios y sin claves adicionales. No expliques nada."
-        )
-        respuesta = await llm.generar(
-            prompt=prompt_reintento,
+        respuesta = await _llamar_modelo_extraccion(
+            entrada=entrada,
+            esquema=esquema,
             modelo=modelo,
-            imagenes=entrada.imagenes,
-            formato_json=True,
+            filtro_claves=filtro_claves,
+            idioma_salida=idioma_salida,
+            informe=informe,
+            sufijo=_SUFIJO_REINTENTO_JSON,
         )
         propuestos2, advertencias2 = parsear_respuesta(respuesta, esquema, filtro_claves)
         if not _hay_advertencia_json_invalido(advertencias2):
@@ -680,6 +1091,7 @@ async def _extraer_por_areas(
     modelo: str,
     filtro_claves: set[str] | None,
     idioma_salida: str,
+    informe: InformeContexto,
 ) -> tuple[list[CampoPropuesto], list[str]]:
     """Extrae campos por áreas de la norma para evitar respuestas JSON enormes."""
     grupos = _grupos_claves_por_area(esquema, filtro_claves)
@@ -696,6 +1108,7 @@ async def _extraer_por_areas(
             filtro_claves=claves,
             idioma_salida=idioma_salida,
             etiqueta=etiqueta,
+            informe=informe,
         )
         advertencias.extend(adv)
         for campo in propuestos:
@@ -1025,6 +1438,29 @@ def aplicar_defaults(esquema: Esquema, propuestos: list[CampoPropuesto]) -> list
     return propuestos
 
 
+def _sin_duplicados(avisos: list[str]) -> list[str]:
+    """Quita avisos repetidos conservando el orden (el modo por áreas los repite)."""
+    return list(dict.fromkeys(avisos))
+
+
+def _avisar_si_propuesta_vacia(
+    propuestos: list[CampoPropuesto],
+    extraibles: list[ElementoEsquema],
+    advertencias: list[str],
+) -> None:
+    """Añade un aviso si ningún campo pedido tiene valor y nada lo explica ya."""
+    if not extraibles:
+        return
+    claves = {el.clave for el in extraibles}
+    if any(c.valor not in (None, "", []) for c in propuestos if c.clave in claves):
+        return
+    if _hay_advertencia_json_invalido(advertencias) or AVISO_SIN_CAMPOS in advertencias:
+        return
+    if any("el modelo no respondió" in a.lower() for a in advertencias):
+        return
+    advertencias.append(AVISO_SIN_VALORES)
+
+
 # =============================================================================
 # Función pública
 # =============================================================================
@@ -1039,6 +1475,7 @@ async def extraer(
     """
     Procesa la entrada con el esquema indicado y devuelve la propuesta.
     """
+    informe = InformeContexto()
     advertencias_modelo: list[str] = []
     texto_verificable = entrada.texto
     texto_control_contaminacion = entrada.texto
@@ -1095,16 +1532,18 @@ async def extraer(
             modelo=modelo,
             filtro_claves=filtro_claves,
             idioma_salida=idioma_salida,
+            informe=informe,
         )
     else:
         try:
             try:
-                _, respuesta = await _llamar_modelo_extraccion(
+                respuesta = await _llamar_modelo_extraccion(
                     entrada=entrada_trabajo,
                     esquema=esquema,
                     modelo=modelo,
                     filtro_claves=filtro_claves,
                     idioma_salida=idioma_salida,
+                    informe=informe,
                 )
             except Exception as e:
                 if entrada_trabajo.texto and entrada_trabajo.imagenes:
@@ -1117,9 +1556,10 @@ async def extraer(
                         texto=entrada_trabajo.texto, imagenes=None, plantilla=entrada_trabajo.plantilla,
                         instrucciones_tipo=entrada_trabajo.instrucciones_tipo,
                     )
-                    _, respuesta = await _llamar_modelo_extraccion(
+                    respuesta = await _llamar_modelo_extraccion(
                         entrada=entrada_solo_texto, esquema=esquema, modelo=modelo,
                         filtro_claves=filtro_claves, idioma_salida=idioma_salida,
+                        informe=informe,
                     )
                 else:
                     raise
@@ -1129,7 +1569,11 @@ async def extraer(
             return Propuesta(
                 norma=esquema.norma, campos=propuestos, modelo=modelo,
                 timestamp=dt.datetime.now().isoformat(timespec="seconds"),
-                idioma_salida=idioma_salida, advertencias=[f"El modelo no respondió: {e}"],
+                idioma_salida=idioma_salida,
+                advertencias=_sin_duplicados(
+                    advertencias_modelo + informe.avisos() + [f"El modelo no respondió: {e}"]
+                ),
+                contexto=informe.resumen(),
             )
 
         propuestos, advertencias = parsear_respuesta(respuesta, esquema, filtro_claves)
@@ -1138,9 +1582,13 @@ async def extraer(
             propuestos, advertencias = await _extraer_por_areas(
                 entrada=entrada_trabajo, esquema=esquema, modelo=modelo,
                 filtro_claves=filtro_claves, idioma_salida=idioma_salida,
+                informe=informe,
             )
 
-    advertencias = advertencias_modelo + advertencias
+    _avisar_si_propuesta_vacia(propuestos, extraibles, advertencias)
+    # Los avisos de contexto van primero: si el documento se recortó o el
+    # prompt desbordó, es lo que explica el resto.
+    advertencias = advertencias_modelo + informe.avisos() + advertencias
     propuestos = controlar_contaminacion_ejemplo(propuestos, texto_control_contaminacion, advertencias)
     propuestos = localizar_spans(propuestos, texto_verificable)
 
@@ -1175,5 +1623,6 @@ async def extraer(
         modelo=modelo,
         timestamp=dt.datetime.now().isoformat(timespec="seconds"),
         idioma_salida=idioma_salida,
-        advertencias=advertencias,
+        advertencias=_sin_duplicados(advertencias),
+        contexto=informe.resumen(),
     )

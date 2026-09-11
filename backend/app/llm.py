@@ -19,8 +19,10 @@ import base64
 import io
 import json
 import logging
+import math
 import os
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -169,6 +171,213 @@ def _cargar_runtime() -> dict[str, Any]:
     )
     return _RUNTIME_CFG
 
+
+
+# -----------------------------------------------------------------------------
+# Presupuesto de la ventana de contexto
+# -----------------------------------------------------------------------------
+#
+# Cuando el prompt supera num_ctx, Ollama no devuelve error: descarta el
+# PRINCIPIO del prompt, conserva unos pocos tokens (keep=4 en su aviso
+# "truncating input prompt") y responde 200 OK. En PlumA el principio es justo
+# lo que no puede perderse: system prompt, reglas y descripción de los campos.
+# Sin instrucciones, el modelo devuelve JSON degradado y la propuesta sale
+# vacía. Si el prompt cabe pero prompt + respuesta no, Ollama desplaza el
+# contexto durante la generación y el efecto es parecido.
+#
+# PlumA no dispone del tokenizador del modelo, así que el presupuesto es una
+# estimación por caracteres. Hay dos defensas complementarias:
+#
+#   1. Antes de llamar, con la estimación central: si el documento no cabe,
+#      se envían su principio y su final con una marca de omisión explícita.
+#      La estimación central evita recortar documentos que sí caben.
+#   2. Después de llamar, con datos reales: Ollama devuelve prompt_eval_count
+#      y eval_count. Si revelan truncado o desplazamiento, el extractor repite
+#      la llamada con una estimación prudente. Un error de estimación deja de
+#      pasar en silencio.
+
+
+def _float_env(nombre: str, defecto: float, minimo: float, maximo: float) -> float:
+    try:
+        valor = float(os.getenv(nombre, str(defecto)))
+    except ValueError:
+        logger.warning("%s no es un número válido; se usa %s", nombre, defecto)
+        return defecto
+    return max(minimo, min(maximo, valor))
+
+
+def _int_env(nombre: str, defecto: int, minimo: int, maximo: int) -> int:
+    try:
+        valor = int(os.getenv(nombre, str(defecto)))
+    except ValueError:
+        logger.warning("%s no es un entero válido; se usa %s", nombre, defecto)
+        return defecto
+    return max(minimo, min(maximo, valor))
+
+
+def _entero(valor: Any) -> int:
+    try:
+        return int(valor or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+# Caracteres por token. 4.0 es una estimación central para español con los
+# tokenizadores habituales (Gemma, Qwen); el texto con ruido de OCR tokeniza
+# peor. La prudente se usa solo al repetir una llamada que ya desbordó.
+CARACTERES_POR_TOKEN = _float_env("PLUMA_CARACTERES_POR_TOKEN", 4.0, 2.0, 6.0)
+CARACTERES_POR_TOKEN_PRUDENTE = min(3.0, CARACTERES_POR_TOKEN)
+# Tokens que se dejan libres para la respuesta al calcular cuánto documento
+# cabe. Nunca supera num_predict.
+RESERVA_SALIDA_TOKENS = _int_env("PLUMA_RESERVA_SALIDA_TOKENS", 1024, 128, 32768)
+# Coste aproximado de cada imagen en la ruta visual. Depende del modelo y de
+# la resolución; solo se usa para detectar ventanas visuales insuficientes.
+TOKENS_POR_IMAGEN = _int_env("PLUMA_TOKENS_POR_IMAGEN", 768, 64, 8192)
+# Plantilla de chat del modelo, tokens especiales y redondeos.
+MARGEN_PLANTILLA_TOKENS = 128
+# Por debajo de esto no tiene sentido enviar documento: la ventana es
+# insuficiente para la norma y el modo pedidos.
+MIN_CARACTERES_DOCUMENTO = 600
+# System prompt supuesto cuando pluma-runtime.yaml no está disponible (tests).
+_CARACTERES_SISTEMA_POR_DEFECTO = 2400
+
+ESTADOS_DESBORDAMIENTO = frozenset({"prompt_truncado", "contexto_agotado"})
+
+
+@dataclass(frozen=True)
+class PresupuestoDocumento:
+    """Caracteres de documento que caben en una llamada."""
+
+    caracteres: int
+    num_ctx: int
+    suficiente: bool
+
+
+def _caracteres_sistema() -> int:
+    try:
+        return len(_cargar_runtime()["sistema"])
+    except Exception:
+        return _CARACTERES_SISTEMA_POR_DEFECTO
+
+
+def presupuesto_documento(
+    prompt_sin_documento: str,
+    *,
+    imagenes: int = 0,
+    caracteres_por_token: float | None = None,
+    reserva_salida: int | None = None,
+) -> PresupuestoDocumento:
+    """Estima cuántos caracteres de documento caben junto al resto del prompt.
+
+    `prompt_sin_documento` es el prompt completo con el bloque de documento
+    vacío. Se suman el system prompt, el refuerzo JSON, las imágenes, un margen
+    de plantilla y la reserva para la respuesta, y lo que queda de la ventana
+    se convierte a caracteres. `suficiente` es False cuando ni siquiera las
+    instrucciones caben con holgura; en ese caso se devuelve el mínimo para que
+    el llamador pueda seguir, pero el resultado no será fiable.
+    """
+    vision = imagenes > 0
+    num_ctx = VISION_NUM_CTX if vision else NUM_CTX
+    num_predict = VISION_NUM_PREDICT if vision else NUM_PREDICT
+    ratio = caracteres_por_token or CARACTERES_POR_TOKEN
+    reserva = RESERVA_SALIDA_TOKENS if reserva_salida is None else reserva_salida
+    reserva = max(0, min(num_predict, reserva))
+
+    caracteres_fijos = _caracteres_sistema() + len(_reforzar_prompt_json(prompt_sin_documento))
+    ocupados = (
+        math.ceil(caracteres_fijos / ratio)
+        + imagenes * TOKENS_POR_IMAGEN
+        + MARGEN_PLANTILLA_TOKENS
+        + reserva
+    )
+    caracteres = int((num_ctx - ocupados) * ratio)
+    return PresupuestoDocumento(
+        caracteres=max(caracteres, MIN_CARACTERES_DOCUMENTO),
+        num_ctx=num_ctx,
+        suficiente=caracteres >= MIN_CARACTERES_DOCUMENTO,
+    )
+
+
+def evaluar_contexto(diagnostico: dict[str, Any] | None) -> str | None:
+    """Interpreta las métricas que Ollama devuelve en cada llamada.
+
+    Devuelve:
+        "prompt_truncado"  el prompt no cabía y Ollama descartó su principio.
+        "contexto_agotado" el prompt cabía, pero prompt + respuesta superaron
+                           la ventana y Ollama desplazó o agotó el contexto.
+        "limite_salida"    la respuesta alcanzó num_predict y puede estar
+                           incompleta.
+        None               sin indicios de problema, o sin métricas.
+
+    Limitación: si Ollama reutiliza la caché de prefijo e informa solo de los
+    tokens nuevos, un truncado puede no detectarse aquí. Por eso el extractor
+    mantiene además el aviso de "ningún campo devuelto".
+    """
+    if not diagnostico:
+        return None
+    num_ctx = _entero(diagnostico.get("num_ctx"))
+    num_predict = _entero(diagnostico.get("num_predict"))
+    prompt = _entero(diagnostico.get("prompt_eval_count"))
+    salida = _entero(diagnostico.get("eval_count"))
+
+    if num_ctx > 0 and prompt >= num_ctx:
+        return "prompt_truncado"
+    if num_ctx > 0 and prompt > 0 and prompt + salida > num_ctx:
+        return "contexto_agotado"
+    if diagnostico.get("done_reason") == "length":
+        if num_predict > 0 and salida >= num_predict:
+            return "limite_salida"
+        return "contexto_agotado"
+    return None
+
+
+def caracteres_por_token_observados(diagnostico: dict[str, Any] | None) -> float | None:
+    """Densidad real caracteres/token de una llamada cuyo prompt no se truncó."""
+    if not diagnostico:
+        return None
+    prompt = _entero(diagnostico.get("prompt_eval_count"))
+    caracteres = _entero(diagnostico.get("caracteres_prompt"))
+    num_ctx = _entero(diagnostico.get("num_ctx"))
+    if prompt <= 0 or caracteres <= 0 or (num_ctx and prompt >= num_ctx):
+        return None
+    return max(2.0, min(6.0, caracteres / prompt))
+
+
+def _registrar_diagnostico(
+    diagnostico: dict[str, Any] | None,
+    *,
+    payload: dict[str, Any],
+    data: dict[str, Any],
+    respuesta: Any,
+    thinking: Any,
+    caracteres_prompt: int,
+    endpoint: str,
+) -> None:
+    """Anota métricas de la llamada. Solo metadatos, nunca contenido."""
+    opciones = payload.get("options") or {}
+    registro = {
+        "modelo": str(payload.get("model") or ""),
+        "num_ctx": opciones.get("num_ctx"),
+        "num_predict": opciones.get("num_predict"),
+        "prompt_eval_count": data.get("prompt_eval_count"),
+        "eval_count": data.get("eval_count"),
+        "done_reason": data.get("done_reason"),
+        "caracteres_prompt": caracteres_prompt,
+        "solo_razonamiento": (
+            isinstance(thinking, str)
+            and bool(thinking.strip())
+            and not (respuesta.strip() if isinstance(respuesta, str) else "")
+        ),
+    }
+    estado = evaluar_contexto(registro)
+    if estado:
+        logger.warning(
+            "Ollama %s modelo=%s: %s (prompt=%s tok, salida=%s tok, num_ctx=%s, num_predict=%s)",
+            endpoint, registro["modelo"], estado, registro["prompt_eval_count"],
+            registro["eval_count"], registro["num_ctx"], registro["num_predict"],
+        )
+    if diagnostico is not None:
+        diagnostico.update(registro)
 
 
 # -----------------------------------------------------------------------------
@@ -363,7 +572,11 @@ def _log_metricas_ollama(data: dict[str, Any], endpoint: str, modelo: str) -> No
         pass
 
 
-async def _post_generate(cliente: httpx.AsyncClient, payload: dict[str, Any]) -> str:
+async def _post_generate(
+    cliente: httpx.AsyncClient,
+    payload: dict[str, Any],
+    diagnostico: dict[str, Any] | None = None,
+) -> str:
     resp = await cliente.post(f"{OLLAMA_URL}/api/generate", json=payload)
     if resp.is_error:
         detalle = (resp.text or "").strip().replace("\n", " ")[:1200]
@@ -378,6 +591,12 @@ async def _post_generate(cliente: httpx.AsyncClient, payload: dict[str, Any]) ->
     data = resp.json()
     _log_metricas_ollama(data, "/api/generate", str(payload.get("model") or ""))
     respuesta = data.get("response")
+    _registrar_diagnostico(
+        diagnostico, payload=payload, data=data, respuesta=respuesta,
+        thinking=data.get("thinking"),
+        caracteres_prompt=len(str(payload.get("system") or "")) + len(str(payload.get("prompt") or "")),
+        endpoint="/api/generate",
+    )
     if not isinstance(respuesta, str):
         raise RuntimeError("Ollama no devolvió una respuesta textual válida.")
     return _validar_respuesta_modelo(
@@ -387,7 +606,11 @@ async def _post_generate(cliente: httpx.AsyncClient, payload: dict[str, Any]) ->
     )
 
 
-async def _post_chat(cliente: httpx.AsyncClient, payload: dict[str, Any]) -> str:
+async def _post_chat(
+    cliente: httpx.AsyncClient,
+    payload: dict[str, Any],
+    diagnostico: dict[str, Any] | None = None,
+) -> str:
     resp = await cliente.post(f"{OLLAMA_URL}/api/chat", json=payload)
     if resp.is_error:
         detalle = (resp.text or "").strip().replace("\n", " ")[:1200]
@@ -403,6 +626,16 @@ async def _post_chat(cliente: httpx.AsyncClient, payload: dict[str, Any]) -> str
     _log_metricas_ollama(data, "/api/chat", str(payload.get("model") or ""))
     mensaje = data.get("message")
     respuesta = mensaje.get("content") if isinstance(mensaje, dict) else None
+    _registrar_diagnostico(
+        diagnostico, payload=payload, data=data, respuesta=respuesta,
+        thinking=mensaje.get("thinking") if isinstance(mensaje, dict) else None,
+        caracteres_prompt=sum(
+            len(str(m.get("content") or ""))
+            for m in payload.get("messages") or []
+            if isinstance(m, dict)
+        ),
+        endpoint="/api/chat",
+    )
     if not isinstance(respuesta, str):
         raise RuntimeError("Ollama no devolvió una respuesta de chat textual válida.")
     return _validar_respuesta_modelo(
@@ -422,9 +655,14 @@ async def generar(
     imagenes: list[bytes] | None = None,
     formato_json: bool = True,
     temperatura: float | None = None,
+    diagnostico: dict[str, Any] | None = None,
 ) -> str:
     """
     Llama al modelo y devuelve la respuesta como cadena.
+
+    Si se pasa `diagnostico`, se rellena con las métricas de Ollama de la
+    llamada que produjo la respuesta (num_ctx, num_predict, prompt_eval_count,
+    eval_count, done_reason...). Ver `evaluar_contexto()`.
 
     Orden de precedencia de parámetros:
         argumento de función > variable de entorno > schemas/pluma-runtime.yaml
@@ -480,7 +718,7 @@ async def generar(
             modelo_final, len(imagenes_optimizadas), opciones_vision.get("num_ctx"), opciones_vision.get("num_predict"),
         )
         async with cliente_local(TIMEOUT_VISION) as cliente:
-            return await _post_chat(cliente, payload_chat)
+            return await _post_chat(cliente, payload_chat, diagnostico)
 
     modo_json = OLLAMA_JSON_MODE if formato_json else "off"
     usar_json_nativo = formato_json and modo_json in {"native", "nativo", "strict", "estricto"}
@@ -500,7 +738,7 @@ async def generar(
 
     async with cliente_local(TIMEOUT) as cliente:
         if not usar_json_nativo:
-            return await _post_generate(cliente, payload)
+            return await _post_generate(cliente, payload, diagnostico)
 
         # Modo nativo solicitado por entorno: si Ollama falla por gramática JSON,
         # reintentamos automáticamente en modo blando para no bloquear el proceso.
@@ -515,7 +753,7 @@ async def generar(
                 payload_blando = dict(payload)
                 payload_blando.pop("format", None)
                 payload_blando["prompt"] = _reforzar_prompt_json(prompt)
-                return await _post_generate(cliente, payload_blando)
+                return await _post_generate(cliente, payload_blando, diagnostico)
             if resp.status_code >= 500:
                 raise RuntimeError(
                     f"Ollama devolvió HTTP {resp.status_code} en /api/generate. "
@@ -527,6 +765,12 @@ async def generar(
         data = resp.json()
         _log_metricas_ollama(data, "/api/generate", str(payload.get("model") or ""))
         respuesta = data.get("response")
+        _registrar_diagnostico(
+            diagnostico, payload=payload, data=data, respuesta=respuesta,
+            thinking=data.get("thinking"),
+            caracteres_prompt=len(str(payload.get("system") or "")) + len(str(payload.get("prompt") or "")),
+            endpoint="/api/generate",
+        )
         if not isinstance(respuesta, str):
             raise RuntimeError("Ollama no devolvió una respuesta textual válida.")
         return _validar_respuesta_modelo(

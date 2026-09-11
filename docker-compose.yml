@@ -156,6 +156,11 @@ services:
       PERMITIR_APAGADO_UI: "false"
       OLLAMA_NUM_CTX: ${OLLAMA_NUM_CTX:-8192}
       OLLAMA_NUM_PREDICT: ${OLLAMA_NUM_PREDICT:-4096}
+      # Presupuesto de la ventana de contexto. PlumA no dispone del tokenizador
+      # del modelo y estima por caracteres; si Ollama trunca pese a todo, lo
+      # detecta con sus métricas y repite con el documento recortado.
+      PLUMA_CARACTERES_POR_TOKEN: ${PLUMA_CARACTERES_POR_TOKEN:-4.0}
+      PLUMA_RESERVA_SALIDA_TOKENS: ${PLUMA_RESERVA_SALIDA_TOKENS:-1024}
       MAX_LONGITUD_TEXTO_EXTRAIDO: ${MAX_LONGITUD_TEXTO_EXTRAIDO:-800000}
       MAX_LONGITUD_VALOR_LLM: ${MAX_LONGITUD_VALOR_LLM:-50000}
       MAX_LONGITUD_EVIDENCIA_LLM: ${MAX_LONGITUD_EVIDENCIA_LLM:-4000}

@@ -131,6 +131,9 @@ def generar_ficha_tecnica(
             "campos_sin_evidencia": estados.count("sin_evidencia"),
             "campos_sin_valor": estados.count("sin_valor"),
         },
+        # Ventana de contexto: si el documento se recortó para caber, la
+        # propuesta se apoya solo en una parte y debe constar en la ficha.
+        "contexto_modelo": dict(getattr(propuesta, "contexto", None) or {}),
         "resultado": {
             "advertencias": len(getattr(propuesta, "advertencias", []) or []),
             "nota": (
