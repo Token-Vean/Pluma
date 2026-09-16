@@ -35,6 +35,7 @@ Extraibilidad = Literal["si", "parcial", "no"]
 TipoCampo = Literal["texto", "fecha", "lista"]
 Confianza = Literal["alta", "media", "baja"]
 EstadoEvidencia = Literal["localizada", "no_localizada", "no_verificable", "sin_evidencia", "sin_valor"]
+OrigenTexto = Literal["documento", "lectura_visual"]
 
 MAX_LONGITUD_VALOR = int(os.getenv("MAX_LONGITUD_VALOR_LLM", "50000"))
 MAX_LONGITUD_EVIDENCIA = int(os.getenv("MAX_LONGITUD_EVIDENCIA_LLM", "4000"))
@@ -111,6 +112,14 @@ class Entrada:
     imagenes: list[bytes] | None = None
     plantilla: str | None = None
     instrucciones_tipo: dict[str, str] = field(default_factory=dict)
+    # "documento": el texto procede del propio documento (capa textual, DOCX,
+    # TXT u OCR local) y las evidencias pueden verificarse contra él.
+    # "lectura_visual": el texto es una transcripción generada por el modelo a
+    # partir de imágenes; cotejar contra ella no verifica el original.
+    origen_texto: OrigenTexto = "documento"
+    # True si ya se intentó la lectura visual previa (con o sin éxito) antes de
+    # llegar al extractor; evita repetir las llamadas multimodales.
+    lectura_visual_intentada: bool = False
 
 
 @dataclass
@@ -267,6 +276,33 @@ _cache_esquemas: dict[tuple[Path, str | None], Esquema] = {}
 # para no depender del semáforo y para evitar cualquier hallazgo de auditoría.
 _cache_esquemas_lock = threading.Lock()
 
+_EXTRAIBILIDAD_VALIDA = {"si", "parcial", "no"}
+
+
+def _normalizar_extraible(valor: Any, *, clave: str, ruta: Path) -> Extraibilidad:
+    """Normaliza el nivel de extraibilidad declarado en el YAML.
+
+    PyYAML sigue YAML 1.1: `extraible: no` sin comillas se carga como el
+    booleano False (y `yes`/`on` como True), no como la cadena "no". Sin esta
+    normalización los campos manuales se trataban como extraíbles: se enviaban
+    al modelo sin instrucción, no recibían su valor por defecto y la interfaz
+    no los marcaba como manuales. Los archiveros editan estos ficheros, así
+    que se acepta el booleano y se rechaza cualquier otro valor.
+    """
+    if valor is False:
+        return "no"
+    if valor is True:
+        return "si"
+    texto = str(valor).strip().lower() if valor is not None else ""
+    if texto == "sí":
+        texto = "si"
+    if texto not in _EXTRAIBILIDAD_VALIDA:
+        raise ValueError(
+            f"Valor de 'extraible' no válido en el campo '{clave}' de {ruta.name}: "
+            f"{valor!r}. Use si, parcial o no."
+        )
+    return texto  # type: ignore[return-value]
+
 
 def cargar_esquema(ruta: str | Path, perfil: str | None = None) -> Esquema:
     """
@@ -328,6 +364,11 @@ def cargar_esquema(ruta: str | Path, perfil: str | None = None) -> Esquema:
         for el in area.get("elementos", []):
             if isinstance(el, dict):
                 el_data = dict(el)
+                el_data["extraible"] = _normalizar_extraible(
+                    el_data.get("extraible"),
+                    clave=str(el_data.get("clave") or "?"),
+                    ruta=ruta,
+                )
                 el_data["area_id"] = area_id
                 el_data["area_nombre"] = area_nombre
                 elementos.append(ElementoEsquema(**el_data))
@@ -1477,7 +1518,6 @@ async def extraer(
     """
     informe = InformeContexto()
     advertencias_modelo: list[str] = []
-    texto_verificable = entrada.texto
     texto_control_contaminacion = entrada.texto
     entrada_trabajo = entrada
 
@@ -1486,8 +1526,10 @@ async def extraer(
     # en conversación directa, pero devuelve todos los campos a null cuando se
     # le exige JSON archivístico estricto. Por eso se hace primero una lectura
     # visual libre con el modelo base y después se usa esa transcripción como
-    # contexto de extracción estructurada.
-    if entrada.imagenes and not entrada.texto:
+    # contexto de extracción estructurada. Si el llamador (api.py) ya la ha
+    # intentado, no se repite: en el caso de fallo duplicaría las llamadas
+    # multimodales, que son las más lentas.
+    if entrada.imagenes and not entrada.texto and not entrada.lectura_visual_intentada:
         transcripcion_visual = await lectura_visual_previa(entrada.imagenes, modelo=modelo)
         if transcripcion_visual:
             entrada_trabajo = Entrada(
@@ -1495,6 +1537,8 @@ async def extraer(
                 imagenes=None,
                 plantilla=entrada.plantilla,
                 instrucciones_tipo=entrada.instrucciones_tipo,
+                origen_texto="lectura_visual",
+                lectura_visual_intentada=True,
             )
             texto_control_contaminacion = transcripcion_visual
             advertencias_modelo.append(
@@ -1507,6 +1551,11 @@ async def extraer(
                 "No se obtuvo una lectura visual preliminar suficiente de la imagen; "
                 "PlumA intentará la extracción directa por visión."
             )
+
+    # Texto contra el que se cotejan las evidencias y si ese cotejo verifica el
+    # documento original o solo una transcripción generada por el modelo.
+    texto_cotejo = entrada_trabajo.texto
+    cotejo_contra_original = bool(texto_cotejo) and entrada_trabajo.origen_texto == "documento"
 
     extraibles = esquema.extraibles(filtro_claves)
     usar_extraccion_por_areas = (
@@ -1555,6 +1604,8 @@ async def extraer(
                     entrada_solo_texto = Entrada(
                         texto=entrada_trabajo.texto, imagenes=None, plantilla=entrada_trabajo.plantilla,
                         instrucciones_tipo=entrada_trabajo.instrucciones_tipo,
+                        origen_texto=entrada_trabajo.origen_texto,
+                        lectura_visual_intentada=entrada_trabajo.lectura_visual_intentada,
                     )
                     respuesta = await _llamar_modelo_extraccion(
                         entrada=entrada_solo_texto, esquema=esquema, modelo=modelo,
@@ -1590,9 +1641,9 @@ async def extraer(
     # prompt desbordó, es lo que explica el resto.
     advertencias = advertencias_modelo + informe.avisos() + advertencias
     propuestos = controlar_contaminacion_ejemplo(propuestos, texto_control_contaminacion, advertencias)
-    propuestos = localizar_spans(propuestos, texto_verificable)
+    propuestos = localizar_spans(propuestos, texto_cotejo)
 
-    if texto_verificable:
+    if cotejo_contra_original:
         for campo in propuestos:
             if campo.valor is not None and campo.evidencia and campo.estado_evidencia == "no_localizada":
                 campo.confianza = "baja"
@@ -1600,6 +1651,35 @@ async def extraer(
                     f"{campo.clave}: la evidencia indicada por el modelo no se localizó "
                     "literalmente en el texto; confianza degradada a baja."
                 )
+    elif texto_cotejo:
+        # El texto es una transcripción del propio modelo. Encontrar la
+        # evidencia en ella solo prueba coherencia con esa lectura, no con la
+        # imagen: el campo se marca como no verificable, se descarta el span
+        # (sus posiciones no corresponden al original) y la confianza alta
+        # baja a media. No encontrarla ni siquiera ahí sí es señal de alarma.
+        hay_evidencia_visual = False
+        for campo in propuestos:
+            if campo.valor is None or not campo.evidencia:
+                continue
+            hay_evidencia_visual = True
+            if campo.estado_evidencia == "no_localizada":
+                campo.confianza = "baja"
+                advertencias.append(
+                    f"{campo.clave}: la evidencia no aparece ni siquiera en la lectura visual "
+                    "previa; confianza degradada a baja."
+                )
+            else:
+                campo.estado_evidencia = "no_verificable"
+                campo.span = None
+                if campo.confianza == "alta":
+                    campo.confianza = "media"
+        if hay_evidencia_visual:
+            advertencias.append(
+                "Documento procesado a partir de una lectura visual previa: las evidencias se "
+                "han cotejado con esa transcripción generada por el modelo, no con la imagen "
+                "original. Se marcan como no verificables textualmente y las confianzas altas "
+                "se degradaron a media."
+            )
     else:
         hay_evidencia_visual = False
         for campo in propuestos:
@@ -1617,6 +1697,13 @@ async def extraer(
 
     propuestos = aplicar_defaults(esquema, propuestos)
 
+    contexto = informe.resumen()
+    contexto["texto_cotejo_evidencias"] = (
+        "documento" if cotejo_contra_original
+        else "lectura_visual" if texto_cotejo
+        else "ninguno"
+    )
+
     return Propuesta(
         norma=esquema.norma,
         campos=propuestos,
@@ -1624,5 +1711,5 @@ async def extraer(
         timestamp=dt.datetime.now().isoformat(timespec="seconds"),
         idioma_salida=idioma_salida,
         advertencias=_sin_duplicados(advertencias),
-        contexto=informe.resumen(),
+        contexto=contexto,
     )

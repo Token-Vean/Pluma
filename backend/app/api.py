@@ -565,7 +565,12 @@ async def describir(
                 modelo=modelo_seleccionado,
             )
             if lectura_visual:
-                doc.entrada = extractor.Entrada(texto=lectura_visual, imagenes=None)
+                doc.entrada = extractor.Entrada(
+                    texto=lectura_visual,
+                    imagenes=None,
+                    origen_texto="lectura_visual",
+                    lectura_visual_intentada=True,
+                )
                 if not modelo_manual:
                     # Dos perfiles: visión para leer la imagen y texto para la extracción.
                     # Esto recupera la agilidad del antiguo modelo PlumA especializado
@@ -587,9 +592,13 @@ async def describir(
                     modelo_extraccion=modelo_seleccionado,
                 )
             else:
+                # Marcar el intento para que el extractor no repita la lectura
+                # visual y pase directamente a la extracción por visión.
+                doc.entrada.lectura_visual_intentada = True
                 advertencias_preproceso.append(
-                    "No se obtuvo lectura visual suficiente. Para evitar llamadas multimodales largas, "
-                    "PlumA puede devolver una propuesta incompleta; pruebe otro modelo visual u OCR local."
+                    "No se obtuvo lectura visual suficiente. PlumA intentará la extracción directa "
+                    "por visión, que puede ser lenta o devolver una propuesta incompleta; pruebe "
+                    "otro modelo visual u OCR local."
                 )
                 _log_peticion("lectura_visual_previa_sin_resultado", peticion_id)
 
@@ -600,6 +609,7 @@ async def describir(
                 imagenes=None,
                 plantilla=doc.entrada.plantilla,
                 instrucciones_tipo=doc.entrada.instrucciones_tipo,
+                origen_texto=doc.entrada.origen_texto,
             )
             advertencias_preproceso.append(
                 "Documento híbrido procesado en modo texto para acelerar el análisis local; "

@@ -12,6 +12,30 @@ la entrada correspondiente de
 
 ### Corregido
 
+- **Los campos manuales (`extraible: no`) se trataban como extraíbles.**
+  PyYAML sigue YAML 1.1 y carga `no` sin comillas como el booleano `False`, no
+  como la cadena `"no"` con la que compara el código. En ISAD(G) completo se
+  enviaban al modelo los 26 campos en lugar de 14 (los 12 manuales sin
+  instrucción); en el modo esencial de ISAAR(CPF), ISDF e ISDIAH entraban los
+  obligatorios manuales; `aplicar_defaults()` nunca aplicaba los valores por
+  defecto y la interfaz no marcaba esos campos como manuales.
+  `extractor.cargar_esquema()` normaliza ahora el valor (`False` → `no`,
+  `True` → `si`, `Sí` → `si`) y rechaza cualquier otro con un error que indica
+  el campo y el fichero. Los YAML no necesitan cambios.
+- **Evidencias de documentos visuales presentadas como verificadas.** Tras la
+  lectura visual previa, las evidencias se cotejaban con la transcripción
+  generada por el propio modelo y podían aparecer como «evidencia verificada en
+  texto» con confianza alta. `Entrada` incorpora `origen_texto`
+  (`documento` | `lectura_visual`). Cuando el texto procede de la lectura
+  visual, una evidencia encontrada en la transcripción se marca como
+  `no_verificable`, se descarta su span y la confianza alta baja a media; si
+  ni siquiera aparece en la transcripción, queda `no_localizada` con confianza
+  baja.
+- **Lectura visual previa repetida al fallar.** Si la lectura de `api.py` no
+  devolvía texto, `extractor.extraer()` volvía a lanzarla sobre las mismas
+  imágenes antes de pasar a la extracción directa por visión, duplicando las
+  llamadas más lentas. `Entrada.lectura_visual_intentada` evita la repetición,
+  y el aviso de `api.py` ya no contradice al del extractor.
 - **Propuestas vacías sin explicación cuando el prompt no cabía en la ventana
   de contexto.** Con `OLLAMA_NUM_CTX=4096` —el valor de `.env.example`— las
   instrucciones de ISAD(G) esencial y un documento de más de una página
@@ -40,6 +64,12 @@ la entrada correspondiente de
 
 ### Añadido
 
+- `contexto_modelo.texto_cotejo_evidencias` en la ficha técnica
+  (`documento`, `lectura_visual` o `ninguno`): indica contra qué se
+  cotejaron las evidencias.
+- `tests/test_extraible_y_lectura_visual.py`: extraibilidad de todos los
+  esquemas incluidos, booleanos YAML, valores por defecto, cotejo de
+  evidencias según el origen del texto y lectura visual no repetida.
 - Advertencias consolidadas de contexto: documento recortado (con caracteres
   enviados sobre el total), ventana insuficiente para las instrucciones,
   desbordamiento no resuelto, salida cortada y respuesta solo con razonamiento.
