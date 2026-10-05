@@ -223,7 +223,8 @@ async def detectar(
     try:
         data = json.loads(respuesta)
     except json.JSONDecodeError:
-        logger.warning("Detección devolvió JSON inválido: %s", respuesta[:200])
+        # Solo metadatos: la respuesta puede contener texto del documento.
+        logger.warning("Detección devolvió JSON inválido: %s", llm.describir_error_json(respuesta))
         return None
 
     clave = data.get("tipo")

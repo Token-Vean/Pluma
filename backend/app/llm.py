@@ -40,7 +40,23 @@ logger = logging.getLogger(__name__)
 
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://host.docker.internal:11434").rstrip("/")
 ALLOW_REMOTE_OLLAMA = remote_ollama_allowed()
-TIMEOUT = httpx.Timeout(connect=10.0, read=300.0, write=30.0, pool=10.0)
+def _segundos_env(nombre: str, defecto: float, minimo: float, maximo: float) -> float:
+    try:
+        valor = float(os.getenv(nombre, str(defecto)))
+    except ValueError:
+        return defecto
+    return max(minimo, min(maximo, valor))
+
+
+# Tiempo máximo de espera de una respuesta textual de Ollama. En equipos sin
+# GPU efectiva un modelo de 4-9B puede tardar varios minutos en generar el JSON
+# de un documento largo; antes estaba fijado en 300 s sin poder cambiarse.
+TIMEOUT = httpx.Timeout(
+    connect=10.0,
+    read=_segundos_env("OLLAMA_TIMEOUT_SECONDS", 300.0, 30.0, 3600.0),
+    write=30.0,
+    pool=10.0,
+)
 TIMEOUT_VISION = httpx.Timeout(
     connect=10.0,
     read=float(os.getenv("OLLAMA_VISION_TIMEOUT_SECONDS", "360")),
@@ -84,10 +100,25 @@ MODELOS_VISUALES_PREFERIDOS = [
 # Algunos modelos locales fallan en Ollama cuando se activa `format: "json"`
 # porque el runtime aplica una gramática JSON estricta. En esos casos aparece
 # un HTTP 500 con mensajes similares a "Unexpected empty grammar stack".
-# Para priorizar compatibilidad local, PlumA usa por defecto modo JSON blando:
-# instrucción estricta en prompt + validación defensiva posterior. Quien quiera
-# forzar el modo nativo puede definir PLUMA_OLLAMA_JSON_MODE=native.
-OLLAMA_JSON_MODE = os.getenv("PLUMA_OLLAMA_JSON_MODE", "soft").strip().lower()
+# Hasta 0.7.2 PlumA usaba por defecto el modo JSON blando (solo instrucción en
+# el prompt), y cualquier defecto de la salida —un salto de línea literal, una
+# comilla sin escapar al citar el documento, una coma final— hacía que se
+# descartara la propuesta entera con "JSON inválido".
+#
+# Desde 0.7.3 el modo por defecto es "schema": se envía a Ollama el esquema JSON
+# exacto de la respuesta (salida estructurada), de modo que el muestreo queda
+# restringido a JSON válido con esa forma. Si el runtime rechaza la gramática,
+# se reintenta automáticamente en modo blando. Valores admitidos:
+#   schema  -> format = esquema JSON de la respuesta (recomendado)
+#   native  -> format = "json" (JSON genérico, sin forma)
+#   soft    -> sin format; solo instrucción en el prompt y reparación posterior
+OLLAMA_JSON_MODE = os.getenv("PLUMA_OLLAMA_JSON_MODE", "schema").strip().lower()
+if OLLAMA_JSON_MODE in {"nativo", "strict", "estricto"}:
+    OLLAMA_JSON_MODE = "native"
+elif OLLAMA_JSON_MODE in {"esquema", "estructurado", "structured"}:
+    OLLAMA_JSON_MODE = "schema"
+elif OLLAMA_JSON_MODE not in {"schema", "native", "soft"}:
+    OLLAMA_JSON_MODE = "schema"
 
 RUNTIME_CONFIG_PATH = Path(
     os.getenv("PLUMA_RUNTIME_CONFIG", "/app/schemas/pluma-runtime.yaml")
@@ -447,17 +478,27 @@ def _reforzar_prompt_json(prompt: str) -> str:
 
 
 def _es_error_gramatica_json_ollama(status_code: int, detalle: str) -> bool:
-    if status_code < 500:
-        return False
+    """¿El error de Ollama se debe a la salida estructurada (format)?
+
+    - 5xx con mensajes de gramática: el runtime no pudo aplicar la gramática
+      JSON a este modelo.
+    - 400 que mencionan format/schema/grammar: versiones de Ollama que no
+      aceptan un esquema JSON en `format`, o esquemas que no saben convertir.
+    En ambos casos tiene sentido reintentar sin `format`.
+    """
     d = (detalle or "").lower()
-    patrones = (
-        "grammar",
-        "empty grammar stack",
-        "unexpected empty grammar",
-        "unused",
-        "llama_decode",
-    )
-    return any(p in d for p in patrones)
+    if status_code >= 500:
+        patrones = (
+            "grammar",
+            "empty grammar stack",
+            "unexpected empty grammar",
+            "unused",
+            "llama_decode",
+        )
+        return any(p in d for p in patrones)
+    if status_code == 400:
+        return any(p in d for p in ("format", "schema", "grammar"))
+    return False
 
 
 def _respuesta_contiene_tokens_invalidos(texto: str) -> bool:
@@ -483,46 +524,26 @@ def _validar_respuesta_modelo(texto: str, *, endpoint: str, modelo: str) -> str:
     return texto
 
 
-def extraer_json_texto(texto: str) -> str:
+def _cargar_json(texto: str) -> Any:
+    """json.loads tolerante a caracteres de control dentro de cadenas.
+
+    `strict=False` acepta saltos de línea y tabuladores literales dentro de
+    los valores, el defecto más frecuente de los modelos locales cuando
+    redactan campos largos como "alcance y contenido".
     """
-    Devuelve el primer objeto JSON válido contenido en una respuesta del modelo.
+    return json.loads(texto, strict=False)
 
-    No confía en que el modelo cumpla exactamente la instrucción de salida: puede
-    envolver el JSON en ```json, añadir una frase previa o texto posterior. Esta
-    función localiza el primer objeto balanceado y lo valida con json.loads.
-    """
-    if not isinstance(texto, str):
-        return texto
 
-    limpio = texto.strip()
-    if not limpio:
-        return limpio
-
-    # Caso ideal: ya es JSON válido.
-    try:
-        json.loads(limpio)
-        return limpio
-    except json.JSONDecodeError:
-        pass
-
-    # Eliminar cercas markdown frecuentes sin depender de ellas.
-    limpio = re.sub(r"^```(?:json)?\s*", "", limpio, flags=re.IGNORECASE)
-    limpio = re.sub(r"\s*```$", "", limpio).strip()
-    try:
-        json.loads(limpio)
-        return limpio
-    except json.JSONDecodeError:
-        pass
-
-    inicio = limpio.find("{")
+def _primer_objeto_balanceado(texto: str) -> str | None:
+    """Devuelve el primer objeto {...} balanceado, respetando cadenas."""
+    inicio = texto.find("{")
     if inicio < 0:
-        return texto
-
+        return None
     en_cadena = False
     escape = False
     profundidad = 0
-    for i in range(inicio, len(limpio)):
-        ch = limpio[i]
+    for i in range(inicio, len(texto)):
+        ch = texto[i]
         if en_cadena:
             if escape:
                 escape = False
@@ -531,7 +552,6 @@ def extraer_json_texto(texto: str) -> str:
             elif ch == '"':
                 en_cadena = False
             continue
-
         if ch == '"':
             en_cadena = True
         elif ch == "{":
@@ -539,14 +559,165 @@ def extraer_json_texto(texto: str) -> str:
         elif ch == "}":
             profundidad -= 1
             if profundidad == 0:
-                candidato = limpio[inicio : i + 1]
-                try:
-                    json.loads(candidato)
-                    return candidato
-                except json.JSONDecodeError:
-                    return texto
+                return texto[inicio : i + 1]
+    return None
+
+
+_LITERALES_PYTHON = {"None": "null", "True": "true", "False": "false"}
+
+
+def reparar_json(texto: str) -> str:
+    """Repara los defectos de sintaxis más habituales de los modelos locales.
+
+    No inventa contenido: solo corrige la forma.
+      - comillas dobles internas sin escapar (citas literales del documento);
+      - saltos de línea, retornos y tabuladores literales dentro de cadenas;
+      - comas finales antes de } o ];
+      - literales de Python (None, True, False) fuera de cadenas.
+
+    Para distinguir una comilla de cierre de una comilla interna se mira el
+    primer carácter significativo que la sigue: si es , } ] o : la comilla
+    cierra la cadena; en otro caso es una comilla del texto citado y se
+    escapa. Es una heurística: si el resultado sigue sin ser JSON válido, el
+    llamador lo trata como inválido igual que antes.
+    """
+    inicio = texto.find("{")
+    if inicio < 0:
+        return texto
+    fin = texto.rfind("}")
+    if fin > inicio:
+        texto = texto[inicio : fin + 1]
+    else:
+        texto = texto[inicio:]
+
+    salida: list[str] = []
+    en_cadena = False
+    escape = False
+    n = len(texto)
+    i = 0
+    while i < n:
+        ch = texto[i]
+        if en_cadena:
+            if escape:
+                salida.append(ch)
+                escape = False
+            elif ch == "\\":
+                salida.append(ch)
+                escape = True
+            elif ch == '"':
+                j = i + 1
+                while j < n and texto[j] in " \t\r\n":
+                    j += 1
+                siguiente = texto[j] if j < n else ""
+                if siguiente in {",", "}", "]", ":", ""}:
+                    salida.append(ch)
+                    en_cadena = False
+                else:
+                    salida.append('\\"')
+            elif ch == "\n":
+                salida.append("\\n")
+            elif ch == "\r":
+                salida.append("\\r")
+            elif ch == "\t":
+                salida.append("\\t")
+            else:
+                salida.append(ch)
+            i += 1
+            continue
+
+        if ch == '"':
+            en_cadena = True
+            salida.append(ch)
+            i += 1
+            continue
+        if ch == ",":
+            j = i + 1
+            while j < n and texto[j] in " \t\r\n":
+                j += 1
+            if j < n and texto[j] in "}]":
+                i += 1
+                continue
+        if ch.isalpha():
+            j = i
+            while j < n and texto[j].isalpha():
+                j += 1
+            palabra = texto[i:j]
+            salida.append(_LITERALES_PYTHON.get(palabra, palabra))
+            i = j
+            continue
+        salida.append(ch)
+        i += 1
+    return "".join(salida)
+
+
+def extraer_json_texto(texto: str) -> str:
+    """
+    Devuelve el primer objeto JSON válido contenido en una respuesta del modelo.
+
+    No confía en que el modelo cumpla exactamente la instrucción de salida: puede
+    envolver el JSON en ```json, añadir una frase previa o texto posterior, o
+    cometer errores de sintaxis menores. Se prueba, por este orden: la respuesta
+    tal cual, sin cercas markdown, el primer objeto balanceado y, por último,
+    una reparación sintáctica conservadora (`reparar_json`).
+
+    Si un candidato ya es JSON estricto se devuelve tal cual (comportamiento
+    anterior). Si solo es válido de forma tolerante o tras la reparación, se
+    devuelve normalizado con json.dumps, de modo que el llamador puede seguir
+    usando json.loads estricto. Si ninguna vía lo consigue, se devuelve el
+    texto original para que el llamador informe del JSON inválido.
+    """
+    if not isinstance(texto, str):
+        return texto
+
+    limpio = texto.strip()
+    if not limpio:
+        return limpio
+
+    candidatos: list[str] = [limpio]
+    sin_cercas = re.sub(r"^```(?:json)?\s*", "", limpio, flags=re.IGNORECASE)
+    sin_cercas = re.sub(r"\s*```\s*$", "", sin_cercas).strip()
+    candidatos.append(sin_cercas)
+    balanceado = _primer_objeto_balanceado(sin_cercas)
+    if balanceado:
+        candidatos.append(balanceado)
+    candidatos.append(reparar_json(sin_cercas))
+
+    for candidato in candidatos:
+        try:
+            json.loads(candidato)
+            return candidato
+        except (json.JSONDecodeError, TypeError, ValueError):
+            pass
+
+    for candidato in candidatos:
+        try:
+            datos = _cargar_json(candidato)
+        except (json.JSONDecodeError, TypeError, ValueError):
+            continue
+        return json.dumps(datos, ensure_ascii=False)
 
     return texto
+
+
+def describir_error_json(texto: Any) -> str:
+    """Diagnóstico de un JSON inválido sin incluir contenido del documento.
+
+    Solo metadatos: longitud, mensaje del parser y posición. Sirve para el log
+    del contenedor sin romper la regla de no registrar contenido documental.
+    """
+    if not isinstance(texto, str):
+        return f"respuesta no textual ({type(texto).__name__})"
+    if not texto.strip():
+        return "respuesta vacía"
+    candidato = reparar_json(texto.strip())
+    try:
+        _cargar_json(candidato)
+        return f"longitud={len(texto)}; reparable"
+    except json.JSONDecodeError as e:
+        return (
+            f"longitud={len(texto)}; {e.msg} en posición {e.pos} de {len(candidato)} "
+            f"tras reparación; empieza por llave={texto.lstrip().startswith('{')}"
+        )
 
 
 def _log_metricas_ollama(data: dict[str, Any], endpoint: str, modelo: str) -> None:
@@ -656,6 +827,7 @@ async def generar(
     formato_json: bool = True,
     temperatura: float | None = None,
     diagnostico: dict[str, Any] | None = None,
+    esquema_json: dict[str, Any] | None = None,
 ) -> str:
     """
     Llama al modelo y devuelve la respuesta como cadena.
@@ -675,9 +847,12 @@ async def generar(
       - Las opciones (temperature, top_p, top_k, repeat_penalty, num_ctx,
         stop) parten del YAML; OLLAMA_NUM_CTX y OLLAMA_NUM_PREDICT del
         entorno las pisan; un `temperatura` explícito pisa el YAML.
-      - Si formato_json=True se pide JSON estricto. Por defecto se hace en modo
-        blando para evitar errores de gramática de Ollama; el modo nativo se
-        puede forzar con PLUMA_OLLAMA_JSON_MODE=native.
+      - Si formato_json=True se pide JSON. Con PLUMA_OLLAMA_JSON_MODE=schema
+        (por defecto) y `esquema_json`, se envía ese esquema en `format` y
+        Ollama restringe la salida a JSON válido con esa forma; sin esquema se
+        usa `format: "json"`. Si Ollama rechaza la gramática, se reintenta
+        una vez sin `format` (modo blando). Con PLUMA_OLLAMA_JSON_MODE=soft
+        nunca se envía `format`.
       - Si se pasan imágenes, se usa la ruta multimodal.
     """
     cfg = _cargar_runtime()
@@ -721,38 +896,44 @@ async def generar(
             return await _post_chat(cliente, payload_chat, diagnostico)
 
     modo_json = OLLAMA_JSON_MODE if formato_json else "off"
-    usar_json_nativo = formato_json and modo_json in {"native", "nativo", "strict", "estricto"}
+    formato: Any = None
+    if modo_json == "schema" and esquema_json:
+        formato = esquema_json
+    elif modo_json in {"schema", "native"}:
+        formato = "json"
 
     payload: dict[str, Any] = {
         "model": modelo_final,
-        "prompt": prompt if usar_json_nativo or not formato_json else _reforzar_prompt_json(prompt),
+        "prompt": _reforzar_prompt_json(prompt) if formato_json else prompt,
         "system": cfg["sistema"],
         "stream": False,
         "think": False,
         "keep_alive": KEEP_ALIVE,
         "options": opciones,
     }
-
-    if usar_json_nativo:
-        payload["format"] = "json"
+    if formato is not None:
+        payload["format"] = formato
 
     async with cliente_local(TIMEOUT) as cliente:
-        if not usar_json_nativo:
+        if formato is None:
             return await _post_generate(cliente, payload, diagnostico)
 
-        # Modo nativo solicitado por entorno: si Ollama falla por gramática JSON,
-        # reintentamos automáticamente en modo blando para no bloquear el proceso.
+        # Salida estructurada: si Ollama no puede aplicar la gramática a este
+        # modelo, se reintenta una vez en modo blando para no bloquear el
+        # proceso. La reparación de extraer_json_texto() cubre ese caso.
         resp = await cliente.post(f"{OLLAMA_URL}/api/generate", json=payload)
         if resp.is_error:
             detalle = (resp.text or "").strip().replace("\n", " ")[:1200]
             if _es_error_gramatica_json_ollama(resp.status_code, detalle):
                 logger.warning(
-                    "Ollama falló con gramática JSON nativa; reintentando sin format=json: %s",
+                    "Ollama rechazó la salida estructurada (%s) con modelo=%s; "
+                    "reintentando sin format: %s",
+                    "esquema" if isinstance(formato, dict) else "json",
+                    modelo_final,
                     detalle[:300],
                 )
                 payload_blando = dict(payload)
                 payload_blando.pop("format", None)
-                payload_blando["prompt"] = _reforzar_prompt_json(prompt)
                 return await _post_generate(cliente, payload_blando, diagnostico)
             if resp.status_code >= 500:
                 raise RuntimeError(

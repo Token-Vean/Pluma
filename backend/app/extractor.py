@@ -849,12 +849,14 @@ def parsear_respuesta(
     extraibles = esquema.extraibles(filtro_claves)
     json_valido = True
 
+    original = json_str
     json_str = llm.extraer_json_texto(json_str)
 
     try:
         data = json.loads(json_str)
-    except (json.JSONDecodeError, TypeError) as e:
-        logger.error("JSON inválido del modelo: %s", e)
+    except (json.JSONDecodeError, TypeError):
+        # Solo metadatos: nunca se registra el contenido de la respuesta.
+        logger.error("JSON inválido del modelo: %s", llm.describir_error_json(original))
         advertencias.append("El modelo devolvió JSON inválido; se omiten propuestas.")
         data = {"campos": {}}
         json_valido = False
@@ -931,6 +933,52 @@ def parsear_respuesta(
 def _hay_advertencia_json_invalido(advertencias: list[str]) -> bool:
     texto = "\n".join(advertencias).lower()
     return "json inválido" in texto or "json invalido" in texto or "no devolvió un objeto json" in texto
+
+
+def _nullable(esquema: dict[str, Any]) -> dict[str, Any]:
+    return {"anyOf": [esquema, {"type": "null"}]}
+
+
+def esquema_json_respuesta(extraibles: list[ElementoEsquema]) -> dict[str, Any]:
+    """Esquema JSON de la respuesta esperada, para la salida estructurada de Ollama.
+
+    Reproduce exactamente la forma que pide el prompt:
+        {"campos": {clave: {"valor": ..., "confianza": ..., "evidencia": ...}}}
+    Con él, Ollama restringe el muestreo a JSON válido con esas claves, de modo
+    que comillas sin escapar, saltos de línea literales o comas sobrantes ya no
+    pueden invalidar la propuesta. Los campos de tipo lista con catálogo se
+    limitan a sus valores permitidos.
+    """
+    propiedades: dict[str, Any] = {}
+    for el in extraibles:
+        if el.tipo == "lista" and el.valores:
+            item: dict[str, Any] = {"type": "string", "enum": list(el.valores)}
+        else:
+            item = {"type": "string"}
+        valor = {"type": "array", "items": item} if el.multiple else item
+        propiedades[el.clave] = {
+            "type": "object",
+            "properties": {
+                "valor": _nullable(valor),
+                "confianza": _nullable({"type": "string", "enum": ["alta", "media", "baja"]}),
+                "evidencia": _nullable({"type": "string"}),
+            },
+            "required": ["valor", "confianza", "evidencia"],
+            "additionalProperties": False,
+        }
+    return {
+        "type": "object",
+        "properties": {
+            "campos": {
+                "type": "object",
+                "properties": propiedades,
+                "required": list(propiedades),
+                "additionalProperties": False,
+            }
+        },
+        "required": ["campos"],
+        "additionalProperties": False,
+    }
 
 
 def _grupos_claves_por_area(esquema: Esquema, filtro_claves: set[str] | None = None) -> list[tuple[str, set[str]]]:
@@ -1011,6 +1059,12 @@ async def _llamar_modelo_extraccion(
                 len(documento_enviado), len(documento_completo), presupuesto.num_ctx,
             )
 
+    # La salida estructurada solo se aplica a la ruta textual: en visión
+    # algunos modelos multimodales fallan con gramática (ver llm.generar).
+    esquema_respuesta = None if entrada.imagenes else esquema_json_respuesta(
+        esquema.extraibles(filtro_claves)
+    )
+
     diagnostico: dict[str, Any] = {}
     respuesta = await llm.generar(
         prompt=prompt,
@@ -1018,6 +1072,7 @@ async def _llamar_modelo_extraccion(
         imagenes=entrada.imagenes,
         formato_json=True,
         diagnostico=diagnostico,
+        esquema_json=esquema_respuesta,
     )
     estado = llm.evaluar_contexto(diagnostico)
     informe.registrar_llamada(diagnostico, estado)
@@ -1061,6 +1116,7 @@ async def _llamar_modelo_extraccion(
             imagenes=entrada.imagenes,
             formato_json=True,
             diagnostico=diagnostico_reintento,
+            esquema_json=esquema_respuesta,
         )
     except Exception as exc:
         logger.warning("Falló el reintento tras desbordamiento de contexto: %s", exc)
@@ -1628,6 +1684,28 @@ async def extraer(
             )
 
         propuestos, advertencias = parsear_respuesta(respuesta, esquema, filtro_claves)
+        if _hay_advertencia_json_invalido(advertencias):
+            # Hasta 0.7.2 solo la extracción por áreas reintentaba ante JSON
+            # inválido; en modo esencial o personalizado la propuesta se perdía
+            # al primer fallo. Se reintenta una vez con el prompt reforzado.
+            logger.warning("JSON inválido en extracción monolítica; reintentando una vez con prompt reforzado")
+            try:
+                respuesta = await _llamar_modelo_extraccion(
+                    entrada=entrada_trabajo,
+                    esquema=esquema,
+                    modelo=modelo,
+                    filtro_claves=filtro_claves,
+                    idioma_salida=idioma_salida,
+                    informe=informe,
+                    sufijo=_SUFIJO_REINTENTO_JSON,
+                )
+                propuestos2, advertencias2 = parsear_respuesta(respuesta, esquema, filtro_claves)
+                if not _hay_advertencia_json_invalido(advertencias2):
+                    advertencias2.insert(0, "Se recuperó la extracción tras reintentar por JSON inválido.")
+                propuestos, advertencias = propuestos2, advertencias2
+            except Exception as e:
+                logger.exception("Fallo en el reintento por JSON inválido")
+                advertencias.append(f"Reintento fallido tras JSON inválido: {e}")
         if _hay_advertencia_json_invalido(advertencias) and filtro_claves is None and len(extraibles) >= EXTRACCION_POR_AREAS_MIN_CAMPOS:
             logger.warning("Extracción monolítica devolvió JSON inválido; reintentando por áreas")
             propuestos, advertencias = await _extraer_por_areas(

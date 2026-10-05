@@ -137,6 +137,12 @@ services:
       PLUMA_VISION_MAX_LONG_EDGE: ${PLUMA_VISION_MAX_LONG_EDGE:-1280}
       PLUMA_VISION_JPEG_QUALITY: ${PLUMA_VISION_JPEG_QUALITY:-78}
       OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-10m}
+      # Tiempos máximos de espera de Ollama (segundos). Hasta ahora no llegaban
+      # al contenedor aunque se definieran en .env.
+      OLLAMA_TIMEOUT_SECONDS: ${OLLAMA_TIMEOUT_SECONDS:-300}
+      OLLAMA_VISION_TIMEOUT_SECONDS: ${OLLAMA_VISION_TIMEOUT_SECONDS:-360}
+      # Salida estructurada: schema (por defecto) | native | soft.
+      PLUMA_OLLAMA_JSON_MODE: ${PLUMA_OLLAMA_JSON_MODE:-schema}
       # Controles de seguridad: valor literal, NO sustituible desde .env.
       # Ver el bloque "Revisión de endurecimiento v0.7.2" en la cabecera.
       USAR_SANDBOX_PARSERS: "true"

@@ -64,7 +64,12 @@ opciones:
   temperature: 0.1
   top_p: 0.9
   top_k: 40
-  repeat_penalty: 1.15
+  # 1.0 = sin penalización. Con 1.15 (hasta 0.7.2) el modelo era penalizado
+  # por repetir los tokens que la respuesta JSON necesita repetir sin parar
+  # (comillas, dos puntos, las claves "valor", "confianza", "evidencia"), lo
+  # que favorecía JSON mal formado. La longitud de la salida ya la acota
+  # OLLAMA_NUM_PREDICT.
+  repeat_penalty: 1.0
   num_ctx: 8192
   stop:
     - "<<<DOCUMENTO_INICIO>>>"

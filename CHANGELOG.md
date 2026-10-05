@@ -12,6 +12,37 @@ la entrada correspondiente de
 
 ### Corregido
 
+- **«El modelo devolvió JSON inválido; se omiten propuestas».** La respuesta se
+  pedía en modo JSON blando (solo instrucción en el prompt) y cualquier defecto
+  de sintaxis del modelo —un salto de línea literal dentro de un valor, comillas
+  sin escapar al citar un pasaje entrecomillado del documento, una coma final,
+  `None` en lugar de `null`— descartaba la propuesta entera. Tres cambios:
+  - `PLUMA_OLLAMA_JSON_MODE=schema` (nuevo valor por defecto): la extracción
+    envía a Ollama el esquema JSON exacto de la respuesta
+    (`extractor.esquema_json_respuesta()`), y el muestreo queda restringido a
+    JSON válido con esas claves; los campos de lista con catálogo se limitan a
+    sus valores permitidos. Si Ollama rechaza la gramática para un modelo, se
+    reintenta una vez sin `format`. La ruta de visión no cambia.
+  - `llm.extraer_json_texto()` acepta caracteres de control dentro de cadenas
+    y, como último recurso, aplica `llm.reparar_json()`: escapa comillas
+    internas, saltos de línea y tabuladores, elimina comas finales y convierte
+    literales de Python. Solo corrige la forma; no añade contenido.
+  - La extracción monolítica (modos esencial y personalizado) reintenta una vez
+    con el prompt reforzado ante JSON inválido, como ya hacía la extracción por
+    áreas.
+- **`repeat_penalty: 1.15` en `pluma-runtime.yaml` penalizaba la propia sintaxis
+  JSON** (comillas, dos puntos y las claves que se repiten en cada campo). Pasa
+  a 1.0.
+- **Tiempo de espera de Ollama no configurable.** La lectura textual estaba
+  fijada en 300 s en el código. Ahora se controla con `OLLAMA_TIMEOUT_SECONDS`.
+  Además, `OLLAMA_VISION_TIMEOUT_SECONDS` y `PLUMA_OLLAMA_JSON_MODE` no llegaban
+  al contenedor aunque se definieran en `.env`, porque `docker-compose.yml` no
+  las pasaba; ahora sí.
+- **Contenido de la respuesta del modelo en el log.** La detección de tipo
+  registraba los primeros 200 caracteres de una respuesta inválida, que pueden
+  contener texto del documento. Ahora, como la extracción, solo registra
+  metadatos (`llm.describir_error_json()`: longitud, error y posición).
+
 - **Los campos manuales (`extraible: no`) se trataban como extraíbles.**
   PyYAML sigue YAML 1.1 y carga `no` sin comillas como el booleano `False`, no
   como la cadena `"no"` con la que compara el código. En ISAD(G) completo se
