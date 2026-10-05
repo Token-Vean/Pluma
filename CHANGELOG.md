@@ -10,6 +10,21 @@ la entrada correspondiente de
 
 ## [Sin publicar]
 
+### Seguridad
+
+- `pypdf` 6.16.1 → 6.19.0: corrige ocho vulnerabilidades de denegación de
+  servicio publicadas después del corte de la v0.7.2 (CVE-2026-102993 a
+  CVE-2026-103000): etiquetas de página romanas o alfabéticas desmesuradas,
+  tokens de objetos indirectos, consumo de memoria en el mapeo y el análisis de
+  fuentes, flujos `FlateDecode`, campos de formulario y PDF con muchos ficheros
+  incrustados. PlumA lee PDF aportados por el usuario; el sandbox de lectores
+  acota el impacto al proceso hijo, pero no lo elimina.
+- `anyio` 4.13.0 → 4.14.2: corrige CVE-2026-63374 (suplantación de
+  certificados TLS por codificación incorrecta de nombres de dominio
+  internacionalizados; PYSEC-2026-4024 y PYSEC-2026-4025 en pip-audit). PlumA
+  solo abre conexiones HTTP locales con Ollama, sin TLS, así que no es
+  explotable en su uso normal; se actualiza para mantener limpia la auditoría.
+
 ### Corregido
 
 - **«El modelo devolvió JSON inválido; se omiten propuestas».** La respuesta se
