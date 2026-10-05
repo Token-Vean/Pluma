@@ -824,10 +824,9 @@ async def generar(
     prompt: str,
     modelo: str | None = None,
     imagenes: list[bytes] | None = None,
-    formato_json: bool = True,
+    formato_json: bool | dict[str, Any] = True,
     temperatura: float | None = None,
     diagnostico: dict[str, Any] | None = None,
-    esquema_json: dict[str, Any] | None = None,
 ) -> str:
     """
     Llama al modelo y devuelve la respuesta como cadena.
@@ -847,14 +846,20 @@ async def generar(
       - Las opciones (temperature, top_p, top_k, repeat_penalty, num_ctx,
         stop) parten del YAML; OLLAMA_NUM_CTX y OLLAMA_NUM_PREDICT del
         entorno las pisan; un `temperatura` explícito pisa el YAML.
-      - Si formato_json=True se pide JSON. Con PLUMA_OLLAMA_JSON_MODE=schema
-        (por defecto) y `esquema_json`, se envía ese esquema en `format` y
-        Ollama restringe la salida a JSON válido con esa forma; sin esquema se
-        usa `format: "json"`. Si Ollama rechaza la gramática, se reintenta
-        una vez sin `format` (modo blando). Con PLUMA_OLLAMA_JSON_MODE=soft
-        nunca se envía `format`.
+      - `formato_json` sigue el campo `format` de la API de Ollama: True pide
+        JSON genérico y un dict pide JSON con ese esquema. Con
+        PLUMA_OLLAMA_JSON_MODE=schema (por defecto) el esquema se envía en
+        `format` y Ollama restringe la salida a JSON válido con esa forma; con
+        True se envía `format: "json"`. Si Ollama rechaza la gramática, se
+        reintenta una vez sin `format` (modo blando). Con
+        PLUMA_OLLAMA_JSON_MODE=soft nunca se envía `format`. El esquema viaja
+        por este parámetro, y no por uno nuevo, para no cambiar la firma de
+        generar(): los dobles de prueba que la sustituyen siguen siendo válidos.
       - Si se pasan imágenes, se usa la ruta multimodal.
     """
+    esquema_json = formato_json if isinstance(formato_json, dict) and formato_json else None
+    formato_json = bool(formato_json)
+
     cfg = _cargar_runtime()
 
     opciones: dict[str, Any] = dict(cfg["opciones"])

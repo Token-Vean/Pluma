@@ -169,7 +169,7 @@ def test_generar_envia_esquema_en_format(monkeypatch):
     monkeypatch.setattr(llm, "OLLAMA_JSON_MODE", "schema")
     llamadas = _instalar_cliente(monkeypatch, [(200, _OK)])
     sch = {"type": "object"}
-    asyncio.run(llm.generar("p", modelo="m", esquema_json=sch))
+    asyncio.run(llm.generar("p", modelo="m", formato_json=sch))
     assert llamadas[0]["format"] == sch
     assert llamadas[0]["think"] is False
 
@@ -179,7 +179,7 @@ def test_generar_reintenta_sin_format_si_falla_la_gramatica(monkeypatch):
     llamadas = _instalar_cliente(
         monkeypatch, [(500, "unexpected empty grammar stack"), (200, _OK)]
     )
-    asyncio.run(llm.generar("p", modelo="m", esquema_json={"type": "object"}))
+    asyncio.run(llm.generar("p", modelo="m", formato_json={"type": "object"}))
     assert len(llamadas) == 2
     assert "format" in llamadas[0]
     assert "format" not in llamadas[1]
@@ -188,7 +188,7 @@ def test_generar_reintenta_sin_format_si_falla_la_gramatica(monkeypatch):
 def test_generar_modo_soft_no_envia_format(monkeypatch):
     monkeypatch.setattr(llm, "OLLAMA_JSON_MODE", "soft")
     llamadas = _instalar_cliente(monkeypatch, [(200, _OK)])
-    asyncio.run(llm.generar("p", modelo="m", esquema_json={"type": "object"}))
+    asyncio.run(llm.generar("p", modelo="m", formato_json={"type": "object"}))
     assert "format" not in llamadas[0]
 
 
@@ -221,8 +221,8 @@ def test_modo_esencial_reintenta_tras_json_invalido(monkeypatch):
     llamadas: list[dict] = []
 
     async def generar_simulado(prompt, modelo=None, imagenes=None, formato_json=True,
-                               temperatura=None, diagnostico=None, esquema_json=None):
-        llamadas.append({"prompt": prompt, "esquema_json": esquema_json})
+                               temperatura=None, diagnostico=None):
+        llamadas.append({"prompt": prompt, "formato_json": formato_json})
         if diagnostico is not None:
             diagnostico.update(num_ctx=8192, num_predict=3000, prompt_eval_count=900,
                                eval_count=100, done_reason="stop")
@@ -232,7 +232,7 @@ def test_modo_esencial_reintenta_tras_json_invalido(monkeypatch):
     propuesta = asyncio.run(extractor.extraer(entrada, esquema, "m", CAMPOS_ESENCIALES, "es"))
 
     assert len(llamadas) == 2
-    assert llamadas[0]["esquema_json"] is not None
+    assert isinstance(llamadas[0]["formato_json"], dict)
     assert "REINTENTO POR JSON INVÁLIDO" in llamadas[1]["prompt"]
     titulo = next(c for c in propuesta.campos if c.clave == "titulo")
     assert titulo.valor == "Remisión del inventario al alcalde"

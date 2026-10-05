@@ -1070,9 +1070,8 @@ async def _llamar_modelo_extraccion(
         prompt=prompt,
         modelo=modelo,
         imagenes=entrada.imagenes,
-        formato_json=True,
+        formato_json=esquema_respuesta or True,
         diagnostico=diagnostico,
-        esquema_json=esquema_respuesta,
     )
     estado = llm.evaluar_contexto(diagnostico)
     informe.registrar_llamada(diagnostico, estado)
@@ -1114,9 +1113,8 @@ async def _llamar_modelo_extraccion(
             prompt=prompt,
             modelo=modelo,
             imagenes=entrada.imagenes,
-            formato_json=True,
+            formato_json=esquema_respuesta or True,
             diagnostico=diagnostico_reintento,
-            esquema_json=esquema_respuesta,
         )
     except Exception as exc:
         logger.warning("Falló el reintento tras desbordamiento de contexto: %s", exc)
