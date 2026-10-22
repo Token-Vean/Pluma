@@ -12,6 +12,16 @@ la entrada correspondiente de
 
 ### Seguridad
 
+- `pillow` 12.3.0 → 13.0.0: corrige 4 avisos críticos y 23 altos (desbordamientos
+  de heap en los decodificadores TIFF y JPEG y en FreeType, inyección de
+  argumentos en la llamada a Ghostscript, lecturas fuera de límites). PlumA
+  decodifica imágenes y páginas de PDF aportadas por el usuario. Pillow 13
+  exige Python 3.11 o superior; la imagen Docker ya usa 3.12 y
+  `requires-python` ya era `>=3.11`.
+- `pypdf` 6.19.0 → 6.21.2: 7 avisos moderados y 1 bajo de denegación de
+  servicio por PDF manipulado, publicados después de la subida a 6.19.0.
+- `certifi` 2026.4.22 → 2026.10.19: retira las raíces emSign cuyas CA
+  intermedias quedaron comprometidas.
 - `pypdf` 6.16.1 → 6.19.0: corrige ocho vulnerabilidades de denegación de
   servicio publicadas después del corte de la v0.7.2 (CVE-2026-102993 a
   CVE-2026-103000): etiquetas de página romanas o alfabéticas desmesuradas,
