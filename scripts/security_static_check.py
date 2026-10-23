@@ -228,6 +228,23 @@ def test_offline_structure_inside_repo() -> None:
     ok("estructura offline conservada dentro del repositorio")
 
 
+def test_no_request_url_path_in_security_code() -> None:
+    """BadHost / CVE-2026-48710: request.url se reconstruye desde la cabecera
+    Host. Las decisiones de seguridad deben usar request.scope["path"]."""
+    import re
+
+    patron = re.compile(r"request\.url\.path(?!\w)")
+    for path in sorted((ROOT / "backend" / "app").rglob("*.py")):
+        for numero, linea in enumerate(read(path).splitlines(), 1):
+            codigo = linea.split("#", 1)[0]
+            if patron.search(codigo):
+                fail(
+                    f"{path.relative_to(ROOT)}:{numero} usa request.url.path; "
+                    'use request.scope["path"] (CVE-2026-48710)'
+                )
+    ok("el backend no decide con request.url.path")
+
+
 if __name__ == "__main__":
     test_no_runtime_artifacts()
     test_no_legacy_modelfile()
@@ -239,4 +256,5 @@ if __name__ == "__main__":
     test_installers_keep_host_and_bundled_profiles()
     test_shutdown_button_policy()
     test_offline_structure_inside_repo()
+    test_no_request_url_path_in_security_code()
     print("\nComprobaciones estáticas de repositorio superadas.")
