@@ -171,7 +171,10 @@ def _extraer_origen(request: Request) -> str | None:
 def _peticion_exenta(request: Request) -> bool:
     if request.method not in METODOS_MUTADORES:
         return True
-    if request.url.path in RUTAS_EXENTAS:
+    # Ruta ASGI cruda (scope["path"]): request.url.path se reconstruye desde la
+    # cabecera Host, manipulable por el cliente (BadHost / CVE-2026-48710), y
+    # permitiría aplicar la exención CSRF a una ruta distinta de la real.
+    if request.scope.get("path", "") in RUTAS_EXENTAS:
         return True
     return False
 
@@ -199,7 +202,7 @@ class ProteccionCSRF(BaseHTTPMiddleware):
         if sec_fetch_site == "cross-site":
             logger.warning(
                 "CSRF: petición %s %s rechazada (Sec-Fetch-Site=cross-site)",
-                request.method, request.url.path,
+                request.method, request.scope.get("path", ""),
             )
             return _respuesta_403(
                 "Petición rechazada: origen cruzado no permitido. PlumA solo acepta acciones desde su propia interfaz local."
@@ -209,7 +212,7 @@ class ProteccionCSRF(BaseHTTPMiddleware):
         if origen is None:
             logger.warning(
                 "CSRF: petición %s %s rechazada (sin Origin ni Referer)",
-                request.method, request.url.path,
+                request.method, request.scope.get("path", ""),
             )
             return _respuesta_403(
                 "Petición rechazada: falta cabecera Origin. "
@@ -218,7 +221,7 @@ class ProteccionCSRF(BaseHTTPMiddleware):
         if not _origen_coincide_con_host(origen, request):
             logger.warning(
                 "CSRF: petición %s %s rechazada (origen no coincide: %s; host: %s)",
-                request.method, request.url.path, origen, request.headers.get("host"),
+                request.method, request.scope.get("path", ""), origen, request.headers.get("host"),
             )
             return _respuesta_403(
                 f"Petición rechazada: origen no permitido ({origen}). "
@@ -229,7 +232,7 @@ class ProteccionCSRF(BaseHTTPMiddleware):
         if not token_valido(token):
             logger.warning(
                 "CSRF: petición %s %s rechazada (token inválido o ausente)",
-                request.method, request.url.path,
+                request.method, request.scope.get("path", ""),
             )
             return _respuesta_403(
                 "Petición rechazada: token CSRF ausente, caducado o inválido. "
