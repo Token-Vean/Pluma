@@ -9,7 +9,7 @@ except Exception:  # pragma: no cover
 
 ROOT = Path(__file__).resolve().parents[1]
 
-APP_VERSION = "0.7.2"
+APP_VERSION = "0.7.3"
 
 
 def fail(msg: str) -> None:
