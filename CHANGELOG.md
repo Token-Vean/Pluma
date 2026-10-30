@@ -151,6 +151,13 @@ la entrada correspondiente de
   El comentario anterior presentaba 4096 como razonable para documentos
   medianos, lo que no se sostiene con los prompts actuales.
 - README, «Ajuste de longitud y contexto»: presupuesto, recorte y variables.
+- Licencia: `LICENSE` contiene solo el texto íntegro de la AGPL-3.0, para que
+  GitHub la reconozca; el aviso de copyright queda en el README.
+  `frontend/static/LICENSE.txt`, el que enlaza la interfaz, tenía solo el aviso
+  abreviado y una nota de «paso pendiente»: ahora incluye el aviso, el enlace
+  al código fuente y el texto íntegro de la licencia.
+- Se retiran de la raíz `RELEASE_NOTES_0.7.0.md` y `RELEASE_NOTES_0.7.1.md`;
+  su contenido está en las entradas 0.7.0 y 0.7.1 de este fichero.
 
 ## [0.7.2] — 2026-09-07
 
