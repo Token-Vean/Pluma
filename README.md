@@ -321,6 +321,8 @@ Lo que se garantiza en esta versión:
 PlumA se distribuye bajo la **GNU Affero General Public License v3 o
 posterior** (AGPL-3.0-or-later). Ver fichero [`LICENSE`](LICENSE).
 
+Copyright (C) 2026 Víctor Villapalos Pardiñas.
+
 Esta licencia permite usar, modificar y redistribuir el software
 libremente, incluso comercialmente, con la condición de que cualquier
 modificación sustancial que se ofrezca como servicio en red debe hacerse
