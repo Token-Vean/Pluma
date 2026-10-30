@@ -205,7 +205,8 @@ class CabecerasSeguridad(BaseHTTPMiddleware):
         respuesta.headers["Permissions-Policy"] = (
             "camera=(), microphone=(), geolocation=(), interest-cohort=()"
         )
-        if request.url.path.startswith("/api/"):
+        # Ruta ASGI cruda: request.url.path depende de la cabecera Host.
+        if request.scope.get("path", "").startswith("/api/"):
             respuesta.headers["Cache-Control"] = "no-store"
         return respuesta
 

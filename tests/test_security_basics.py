@@ -105,3 +105,24 @@ def test_router_usa_misma_variable_de_sandbox():
     assert "_PLUMA_SANDBOX_CHILD" in inspect.getsource(parser_sandbox)
     assert "_PLUMA_SANDBOX_CHILD" in inspect.getsource(router.procesar)
     assert "_ASISTENTE_ARCHIVISTICO_SANDBOX_CHILD" not in inspect.getsource(router.procesar)
+
+
+def test_exencion_csrf_decide_por_ruta_asgi_real():
+    """BadHost / CVE-2026-48710: request.url.path se reconstruye desde la
+    cabecera Host. La exención CSRF debe decidirse con scope["path"], de modo
+    que un Host manipulado no pueda hacer pasar una ruta mutadora por exenta."""
+    from types import SimpleNamespace
+
+    from app.csrf import _peticion_exenta
+
+    peticion_manipulada = SimpleNamespace(
+        method="POST",
+        scope={"path": "/api/configuracion"},
+        url=SimpleNamespace(path="/api/csrf"),  # lo que vería un Host envenenado
+    )
+    assert _peticion_exenta(peticion_manipulada) is False
+
+    peticion_legitima = SimpleNamespace(
+        method="POST", scope={"path": "/api/csrf"}, url=SimpleNamespace(path="/api/csrf")
+    )
+    assert _peticion_exenta(peticion_legitima) is True

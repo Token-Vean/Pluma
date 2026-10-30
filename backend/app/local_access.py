@@ -46,7 +46,7 @@ class ProteccionAccesoLocal(BaseHTTPMiddleware):
         if has_forbidden_proxy_headers(request.headers):
             logger.warning(
                 "Solicitud rechazada por cabeceras de proxy en modo local estricto: path=%s",
-                request.url.path,
+                request.scope.get("path", ""),
             )
             return _respuesta_403(
                 "PlumA está en modo local estricto y no acepta acceso mediante proxy, "
@@ -58,7 +58,7 @@ class ProteccionAccesoLocal(BaseHTTPMiddleware):
             logger.warning(
                 "Solicitud rechazada por Host no local: host=%r path=%s",
                 host_header,
-                request.url.path,
+                request.scope.get("path", ""),
             )
             return _respuesta_403(
                 "PlumA está bloqueada para uso local. Acceda mediante "
