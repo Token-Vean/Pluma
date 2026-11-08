@@ -35,6 +35,13 @@ logger = logging.getLogger(__name__)
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://host.docker.internal:11434")
 PLUMA_OLLAMA_MODE = os.getenv("PLUMA_OLLAMA_MODE", "host")
 MODELO_BASE = os.getenv("MODELO_BASE", "gemma4:e2b")
+
+def _es_modelo_cloud(nombre: str) -> bool:
+    n = (nombre or "").strip().lower()
+    if ":" not in n:
+        return False
+    tag = n.rsplit(":", 1)[1]
+    return tag == "cloud" or tag.endswith("-cloud")
 PERFIL = os.getenv("PERFIL", "host-local-locked").strip().lower()
 RUNTIME_CONFIG_PATH = Path(
     os.getenv("PLUMA_RUNTIME_CONFIG", "/app/schemas/pluma-runtime.yaml")
@@ -67,6 +74,11 @@ def _timeout_rapido() -> httpx.Timeout:
 
 async def preparar() -> None:
     try:
+        if _es_modelo_cloud(MODELO_BASE):
+            raise RuntimeError(
+                "PlumA no admite modelos cloud de Ollama en la release local. "
+                "Use un modelo descargado localmente sin etiqueta :cloud."
+            )
         if not RUNTIME_CONFIG_PATH.exists():
             raise FileNotFoundError(
                 f"No se encuentra la configuración de runtime en {RUNTIME_CONFIG_PATH}. "
@@ -128,5 +140,6 @@ async def _listar_modelos() -> list[str]:
         modelos = []
         for m in r.json().get("models", []):
             if isinstance(m, dict) and isinstance(m.get("name"), str):
-                modelos.append(m["name"])
+                if not _es_modelo_cloud(m["name"]):
+                    modelos.append(m["name"])
         return modelos
