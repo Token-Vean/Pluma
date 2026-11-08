@@ -223,11 +223,12 @@ transparencia.
 Cuando el instalador detecta Ollama nativo en el host (modo
 `PLUMA_OLLAMA_MODE=host`), la app del contenedor se conecta a
 `host.docker.internal:11434`. PlumA no introduce exposición de red —
-Ollama escucha en `0.0.0.0:11434` por defecto independientemente de
-PlumA — pero el modo host hace más probable que un archivero esté usando
-un Ollama nativo expuesto sin saberlo. La sección "Endurecimiento de
-Ollama nativo" de `INSTALACION.md` documenta cómo limitarlo a loopback
-con `OLLAMA_HOST=127.0.0.1`.
+Ollama escucha por defecto en `127.0.0.1:11434`. El riesgo aparece si el
+usuario modifica `OLLAMA_HOST` para escuchar en `0.0.0.0` o en una IP de
+red. En Linux existe además una limitación práctica: el loopback del host no es
+alcanzable desde el contenedor mediante `host.docker.internal`; por ello el
+perfil `bundled` es la opción recomendada. La sección "Endurecimiento de
+Ollama nativo" de `INSTALACION.md` lo documenta.
 
 ### Imagen oficial `ollama/ollama` no escaneada
 
