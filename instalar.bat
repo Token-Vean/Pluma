@@ -164,13 +164,10 @@ if /I not "!PLUMA_PROFILE!"=="bundled" (
     echo AVISO de seguridad - Ollama nativo
     echo ----------------------------------------
     echo Comprueba que tu Ollama del host esta escuchando SOLO en 127.0.0.1.
-    echo Por defecto, Ollama escucha en 0.0.0.0:11434, lo que significa que
-    echo cualquier dispositivo en tu red puede enviarle peticiones.
-    echo.
-    echo Para limitarlo a tu equipo en Windows, define la variable de entorno
-    echo del sistema:
-    echo     OLLAMA_HOST=127.0.0.1
-    echo y reinicia Ollama. Mas detalles en INSTALACION.md.
+    echo Ollama escucha por defecto en 127.0.0.1:11434.
+    echo Comprueba que OLLAMA_HOST no se haya cambiado a 0.0.0.0 ni a una IP
+    echo de red antes de procesar documentacion sensible.
+    echo Mas detalles en INSTALACION.md.
     echo.
 )
 REM Soltar el directorio de instalacion antes del pause: cmd.exe retiene un

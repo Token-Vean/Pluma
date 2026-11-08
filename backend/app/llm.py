@@ -126,6 +126,22 @@ RUNTIME_CONFIG_PATH = Path(
 
 validate_ollama_url(OLLAMA_URL)
 
+def es_modelo_cloud(nombre: str) -> bool:
+    """Detecta etiquetas de Ollama cuya inferencia se ejecuta en Ollama Cloud."""
+    n = (nombre or "").strip().lower()
+    if ":" not in n:
+        return False
+    tag = n.rsplit(":", 1)[1]
+    return tag == "cloud" or tag.endswith("-cloud")
+
+
+def validar_modelo_local(nombre: str) -> None:
+    if es_modelo_cloud(nombre):
+        raise RuntimeError(
+            "PlumA está bloqueado para procesamiento local y rechaza modelos cloud de Ollama "
+            f"({nombre}). Seleccione un modelo local sin etiqueta :cloud."
+        )
+
 
 # -----------------------------------------------------------------------------
 # Cliente HTTP local
@@ -869,6 +885,7 @@ async def generar(
         opciones["temperature"] = temperatura
 
     modelo_final = modelo or await elegir_modelo_por_defecto(vision=bool(imagenes))
+    validar_modelo_local(modelo_final)
 
     # Ruta visual segura. En visión no usamos `format: "json"`: algunos modelos
     # multimodales funcionan bien con imágenes, pero fallan cuando Ollama aplica
@@ -974,7 +991,8 @@ async def modelos_disponibles() -> list[str]:
         modelos = []
         for m in resp.json().get("models", []):
             if isinstance(m, dict) and isinstance(m.get("name"), str):
-                modelos.append(m["name"])
+                if not es_modelo_cloud(m["name"]):
+                    modelos.append(m["name"])
         return modelos
 
 

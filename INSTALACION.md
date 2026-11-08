@@ -49,17 +49,14 @@ nativo/local del usuario (`PLUMA_OLLAMA_MODE=host`) en lugar de levantar un
 segundo Ollama dentro de Docker. Esto evita duplicar modelos y asegura que se
 trabaja con los modelos que el usuario ya tiene descargados y controla.
 
-**Punto de atención de seguridad.** El servicio de Ollama, por defecto,
-escucha en `0.0.0.0:11434`, es decir, acepta conexiones desde cualquier
-interfaz de red del equipo. En una red corporativa o wifi compartida,
-otros dispositivos de la misma red pueden enviar prompts a tu Ollama,
-gastarle compute y, potencialmente, ver respuestas que generes mientras
-procesas documentos sensibles.
+**Punto de atención de seguridad.** Ollama escucha por defecto en
+`127.0.0.1:11434` (loopback). La exposición a la red aparece si el usuario
+cambia `OLLAMA_HOST` a `0.0.0.0`, a una IP de la LAN o configura un
+servicio equivalente. En ese caso, otros equipos podrían alcanzar el motor.
 
-PlumA no introduce esta exposición — es la configuración por defecto de
-Ollama, independientemente de PlumA — pero al fomentar el modo host
-conviene cerrarla explícitamente. Las tres opciones siguientes la
-limitan a `localhost` (`127.0.0.1`).
+PlumA comprueba que el endpoint configurado sea local y, además, rechaza
+modelos de Ollama con etiquetas cloud. Aun así, si reutilizas un Ollama nativo
+conviene verificar su configuración antes de procesar documentación sensible.
 
 ### Windows
 
@@ -93,21 +90,14 @@ añade `export OLLAMA_HOST=127.0.0.1`.
 
 ### Linux (systemd)
 
-Edita el servicio de Ollama con `sudo systemctl edit ollama` y añade:
+En Linux, un Ollama nativo limitado a `127.0.0.1` no es accesible desde el
+contenedor a través de `host.docker.internal`, porque esa dirección apunta a
+la pasarela del puente Docker y no al loopback del host. Para un despliegue
+simple y cerrado, usa el perfil `bundled` de PlumA.
 
-```
-[Service]
-Environment="OLLAMA_HOST=127.0.0.1"
-```
-
-Recarga y reinicia:
-
-```
-sudo systemctl daemon-reload
-sudo systemctl restart ollama
-```
-
-Verifica con `ss -tlnp | grep 11434`. Debe aparecer `127.0.0.1:11434`.
+Solo si administras conscientemente la red Docker, puedes publicar Ollama en
+una dirección del host alcanzable desde el puente y limitarla mediante firewall.
+No se recomienda `OLLAMA_HOST=0.0.0.0` en equipos con documentación sensible.
 
 ### Comprobación final
 
