@@ -230,6 +230,22 @@ alcanzable desde el contenedor mediante `host.docker.internal`; por ello el
 perfil `bundled` es la opción recomendada. La sección "Endurecimiento de
 Ollama nativo" de `INSTALACION.md` lo documenta.
 
+### Sin inicio de sesión: equipos compartidos
+
+PlumA no tiene usuarios ni contraseña. Cualquier proceso que pueda
+conectar con `127.0.0.1:8082` en el mismo equipo puede usar la
+aplicación. En un ordenador personal esto equivale a la sesión del
+propio usuario. En un **equipo compartido** no es así: en un servidor
+de terminales (Escritorio remoto/RDS, Citrix) o en un puesto donde
+varias personas mantienen sesiones abiertas a la vez, `127.0.0.1` es
+común a todas. Otra persona del mismo servidor podría usar PlumA, ver
+descripciones en curso o pedir exportaciones.
+
+En esos entornos conviene no instalar PlumA en el servidor compartido
+y usarlo en un puesto individual, o detener PlumA al terminar
+(`detener.bat` / `detener.sh`). Si hace falta una versión multiusuario,
+Tipo, de la misma suite, incluye usuarios locales.
+
 ### Imagen oficial `ollama/ollama` no escaneada
 
 El workflow `.github/workflows/security-checks.yml` ejecuta Trivy sobre
