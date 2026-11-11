@@ -8,6 +8,24 @@ de cada versión publicada, junto con su manifiesto SHA-256, están adjuntas a
 la entrada correspondiente de
 [GitHub Releases](https://github.com/Token-Vean/Pluma/releases).
 
+## [Sin publicar]
+
+### Seguridad
+
+- Se rechazan los modelos de Ollama que delegan la inferencia en su servicio
+  en la nube (etiquetas `cloud` o `-cloud`), también al preparar el modelo
+  durante la instalación (#20).
+- `pypdf` 6.21.4 (#20).
+
+### Documentado
+
+- Ollama escucha por defecto en `127.0.0.1:11434`, no en `0.0.0.0`: se
+  corrigen `INSTALACION.md`, `KNOWN_ISSUES.md` e `instalar.bat`, y se explica
+  por qué en Linux el modo host no alcanza un Ollama limitado a loopback (#20).
+- Nuevo riesgo residual en `KNOWN_ISSUES.md`: PlumA no tiene inicio de sesión,
+  así que en un servidor compartido (Escritorio remoto, Citrix) otras sesiones
+  pueden usarlo. `INSTALACION.md` lo advierte al empezar.
+
 ## [0.7.3] — 2026-10-30
 
 ### Seguridad

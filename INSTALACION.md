@@ -9,6 +9,11 @@ El asistente usa **Docker** para aislar la aplicación del resto del
 sistema. Docker es una herramienta gratuita que permite que el
 programa funcione exactamente igual en cualquier ordenador.
 
+Instálalo en tu propio puesto, no en un servidor compartido por varias
+personas (Escritorio remoto o Citrix): PlumA no pide contraseña y, en
+un servidor así, otras sesiones podrían usarlo. Lo explica
+`KNOWN_ISSUES.md`, en «Sin inicio de sesión: equipos compartidos».
+
 ### Paso previo: instalar Docker
 
 Si todavía no tienes Docker en tu equipo:
