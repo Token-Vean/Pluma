@@ -140,6 +140,6 @@ async def _listar_modelos() -> list[str]:
         modelos = []
         for m in r.json().get("models", []):
             if isinstance(m, dict) and isinstance(m.get("name"), str):
-                if not _es_modelo_cloud(m["name"]):
+                if not _es_modelo_cloud(m["name"]) and not llm.es_entrada_remota(m):
                     modelos.append(m["name"])
         return modelos
