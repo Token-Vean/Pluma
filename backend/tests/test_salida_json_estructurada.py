@@ -162,6 +162,14 @@ def _instalar_cliente(monkeypatch, guion):
     # schemas/pluma-runtime.yaml en el entorno que la ejecuta.
     monkeypatch.setattr(llm, "_RUNTIME_CFG", _RUNTIME_PRUEBA)
     monkeypatch.setattr(llm, "cliente_local", lambda timeout: _ClienteSimulado(guion, llamadas))
+
+    # Estas pruebas cubren el campo `format`; la comprobación previa de que el
+    # modelo es local (/api/show) tiene sus propias pruebas en
+    # tests/test_modelos_remotos.py y aquí se neutraliza para no consumir guion.
+    async def _modelo_local(nombre):
+        return None
+
+    monkeypatch.setattr(llm, "verificar_modelo_local", _modelo_local)
     return llamadas
 
 
