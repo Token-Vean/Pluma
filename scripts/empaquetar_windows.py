@@ -6,7 +6,6 @@ import hashlib
 import io
 import re
 import subprocess
-import tarfile
 import zipfile
 from pathlib import Path, PurePosixPath
 
@@ -54,21 +53,39 @@ def empaquetar(revision: str, salida: Path) -> Path:
 
     commit = git("rev-parse", "--verify", "--end-of-options", revision + "^{commit}").decode().strip()
     archivos: dict[str, bytes] = {}
-    with tarfile.open(fileobj=io.BytesIO(git("archive", "--format=tar", commit))) as ar:
-        for miembro in ar:
-            nombre = destino(miembro.name)
-            if miembro.isdir() or not nombre:
-                continue
-            if not miembro.isfile():
-                raise ValueError("Tipo de archivo inesperado: " + miembro.name)
-            contenido = ar.extractfile(miembro).read()
-            if nombre.endswith((".bat", ".vbs", ".ps1")):
-                contenido = contenido.replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")
-            archivos[nombre] = contenido
+    # git archive aplica conversiones de fin de línea en Windows. Leer los
+    # objetos directamente garantiza el mismo ZIP con cualquier core.autocrlf.
+    seleccion = []
+    for entrada in git("ls-tree", "-rz", commit).split(b"\0"):
+        if not entrada:
+            continue
+        metadatos, ruta = entrada.split(b"\t", 1)
+        modo, tipo, sha = metadatos.decode().split()
+        nombre = destino(ruta.decode())
+        if not nombre:
+            continue
+        if tipo != "blob" or modo not in {"100644", "100755"}:
+            raise ValueError("Tipo de archivo inesperado: " + nombre)
+        seleccion.append((nombre, sha))
+    consulta = "".join(sha + "\n" for _, sha in seleccion).encode()
+    objetos = io.BytesIO(subprocess.check_output(["git", "cat-file", "--batch"], input=consulta, cwd=ROOT))
+    for nombre, sha in seleccion:
+        recibido, tipo, tamano = objetos.readline().decode().split()
+        if recibido != sha or tipo != "blob":
+            raise ValueError("Objeto Git inesperado para " + nombre)
+        contenido = objetos.read(int(tamano))
+        if objetos.read(1) != b"\n":
+            raise ValueError("Objeto Git incompleto para " + nombre)
+        if nombre.endswith((".bat", ".vbs", ".ps1")):
+            contenido = contenido.replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")
+        archivos[nombre] = contenido
     faltan = (PANEL | {"programa/" + ruta for ruta in RAIZ | FIJOS}) - archivos.keys()
     if faltan:
         raise ValueError(f"Paquete incompleto: {sorted(faltan)}")
-    version = re.search(rb'^APP_VERSION = "(\d+\.\d+\.\d+)"$', archivos["programa/backend/app/version.py"], re.M)[1].decode()
+    version_app = re.search(rb'^APP_VERSION = "(\d+\.\d+\.\d+)"\r?$', archivos["programa/backend/app/version.py"], re.M)
+    if not version_app:
+        raise ValueError("No se encuentra APP_VERSION en el código de la revisión.")
+    version = version_app[1].decode()
     archivos["REVISION.txt"] = f"PlumA {version}\r\nhttps://github.com/Token-Vean/Pluma/commit/{commit}\r\n".encode()
     archivos["ayuda/Novedades.txt"] = git("show", f"{commit}:releases/{version}.md").replace(b"\n", b"\r\n")
     salida.mkdir(parents=True, exist_ok=True)

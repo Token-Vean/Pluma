@@ -39,7 +39,7 @@ usuarios sin antes añadir autenticación real.
 
 ### Imagen base de Python
 
-El Dockerfile utiliza `python:3.12-slim-bookworm` por etiqueta. Una reconstrucción puede incorporar actualizaciones de Debian y Python. El motor Ollama del perfil Docker está fijado por etiqueta y digest en Compose.
+El Dockerfile utiliza `python:3.12-slim-trixie` por etiqueta. Una reconstrucción puede incorporar actualizaciones de Debian y Python. El motor Ollama del perfil Docker está fijado por etiqueta y digest en Compose.
 
 ### Falta de fuzzing y cobertura ampliada de tests
 

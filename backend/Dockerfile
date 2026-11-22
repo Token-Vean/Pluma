@@ -7,13 +7,13 @@
 # Ejecuta como usuario no privilegiado (uid 10001).
 #
 # Reproducibilidad:
-#   - Imagen base Python fijada por tag de rama estable (3.12-slim-bookworm).
+#   - Imagen base Python fijada por tag de rama estable (3.12-slim-trixie).
 #   - Dependencias fijadas en requirements.txt (versión exacta).
 #   - Sin llamadas de red durante el runtime salvo a Ollama (ver
 #     CUMPLIMIENTO.md).
 # =============================================================================
 
-ARG PYTHON_IMAGE=python:3.12-slim-bookworm
+ARG PYTHON_IMAGE=python:3.12-slim-trixie
 FROM ${PYTHON_IMAGE} AS builder
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -48,11 +48,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 RUN apt-get update && apt-get upgrade -y --no-install-recommends \
     && apt-get install -y --no-install-recommends \
         libjpeg62-turbo \
-        libpng16-16 \
+        libpng16-16t64 \
         libtiff6 \
         libwebp7 \
-        libxml2 \
-        libxslt1.1 \
         tesseract-ocr \
         tesseract-ocr-spa \
         tesseract-ocr-eng \

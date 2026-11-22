@@ -29,7 +29,9 @@ else
   rm "$prueba/$archivo"
   motor="$(docker run -d --entrypoint sleep "$app" 3600)"
   netpid="$(docker inspect -f '{{.State.Pid}}' "$motor")"
-  cli=(sudo nsenter -t "$netpid" -n -- runuser -u "$(id -un)" -- env "HOME=$prueba" OLLAMA_HOST=127.0.0.1:11434 OLLAMA_NO_CLOUD=1 "$prueba/bin/ollama")
+  resolv="$(docker inspect -f '{{.ResolvConfPath}}' "$motor")"
+  cli=(sudo unshare --mount --propagation private bash -c 'mount --bind "$1" /etc/resolv.conf; shift; exec "$@"' _ "$resolv"
+    nsenter -t "$netpid" -n -- runuser -u "$(id -un)" -- env "HOME=$prueba" OLLAMA_HOST=127.0.0.1:11434 OLLAMA_NO_CLOUD=1 "$prueba/bin/ollama")
   "${cli[@]}" serve >"$prueba/motor.log" 2>&1 &
 fi
 for _ in {1..60}; do "${cli[@]}" list >/dev/null 2>&1 && break; sleep 1; done
@@ -63,6 +65,7 @@ for i in "${!contenedores[@]}"; do
 done
 docker exec -i -e OLLAMA_NUM_PREDICT=64 -e OLLAMA_VISION_NUM_PREDICT=64 -e OLLAMA_NUM_CTX=4096 \
   "$cliente" python - < scripts/verificar_inferencia_local.py
+exito=true
 for i in "${!contenedores[@]}"; do
   sudo kill -INT "$(cat "$prueba/$i.pid")"
   for _ in {1..10}; do grep -q 'packets dropped by kernel' "$prueba/$i.log" && break; sleep 1; done
@@ -71,5 +74,9 @@ for i in "${!contenedores[@]}"; do
   externos="$(sudo tcpdump -nn -r "$prueba/$i.pcap" "$filtro" 2>/dev/null | wc -l)"
   locales="$(sudo tcpdump -nn -r "$prueba/$i.pcap" 'tcp port 11434' 2>/dev/null | wc -l)"
   echo "Perfil $modo, captura $i: $locales paquetes de inferencia y $externos paquetes a otros destinos."
-  [[ "$locales" -gt 0 && "$externos" -eq 0 ]]
+  if [[ "$externos" -gt 0 ]]; then
+    sudo tcpdump -qnn -r "$prueba/$i.pcap" "$filtro"
+  fi
+  if [[ "$locales" -eq 0 || "$externos" -ne 0 ]]; then exito=false; fi
 done
+[[ "$exito" == true ]]
