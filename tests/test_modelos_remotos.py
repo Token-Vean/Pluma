@@ -44,8 +44,10 @@ class _Respuesta:
 class _Ollama:
     """Ollama simulado: responde a /api/tags y /api/show y anota las llamadas."""
 
-    def __init__(self, *, tags=None, show=(200, {}), error=None):
+    def __init__(self, *, tags=None, show=(200, {}), error=None, version="0.40.17", estado=None):
         self.tags = tags or []
+        self.version = version
+        self.estado = {"cloud": {"disabled": True}} if estado is None else estado
         self.show = show
         self.error = error
         self.llamadas: list[tuple[str, str, object]] = []
@@ -61,6 +63,11 @@ class _Ollama:
 
     async def get(self, url):
         self.llamadas.append(("GET", url, None))
+        if url.endswith("/version"):
+            return _Respuesta(200, {"version": self.version})
+        if url.endswith("/status"):
+            return _Respuesta(200, self.estado)
+        assert url.endswith("/tags")
         return _Respuesta(200, {"models": self.tags})
 
     async def post(self, url, json=None):  # noqa: A002 - firma de httpx
@@ -93,10 +100,15 @@ def test_el_listado_excluye_modelos_remotos_aunque_no_se_llamen_cloud(monkeypatc
     assert asyncio.run(llm.modelo_disponible("mi-modelo")) is False
 
 
-def test_verificar_acepta_un_modelo_local(monkeypatch):
-    ollama = _instalar(monkeypatch, _Ollama(show=(200, {"details": {}, "capabilities": ["completion"]})))
+@pytest.mark.parametrize("datos", [
+    {"details": {"format": "gguf", "family": "gemma4"}},
+    {"details": {"family": "gemma4"}, "model_info": {"general.architecture": "gemma4"}},
+])
+def test_verificar_acepta_un_modelo_local(monkeypatch, datos):
+    ollama = _instalar(monkeypatch, _Ollama(show=(200, datos)))
     asyncio.run(llm.verificar_modelo_local("gemma4:e2b"))
-    assert ollama.llamadas == [("POST", f"{llm.OLLAMA_URL}/api/show", {"model": "gemma4:e2b"})]
+    assert [url.rsplit("/", 1)[1] for _, url, _ in ollama.llamadas] == ["version", "status", "show"]
+    assert ollama.llamadas[-1][2] == {"model": "gemma4:e2b"}
 
 
 @pytest.mark.parametrize("show", [
@@ -118,6 +130,9 @@ def test_verificar_rechaza_la_etiqueta_cloud_sin_consultar(monkeypatch):
 
 
 @pytest.mark.parametrize("ollama", [
+    _Ollama(show=(200, {})),
+    _Ollama(show=(200, {"details": {}, "capabilities": ["completion"]})),
+    _Ollama(show=(200, {"details": {"format": "  ", "family": "gemma4"}})),
     _Ollama(show=(404, {"error": "model not found"})),
     _Ollama(show=(500, "error interno")),
     _Ollama(show=(200, ValueError("no es JSON"))),
@@ -135,6 +150,20 @@ def test_generar_no_envia_el_documento_a_un_modelo_remoto(monkeypatch):
     monkeypatch.setattr(llm, "_RUNTIME_CFG", {"sistema": "s", "opciones": {}})
     with pytest.raises(RuntimeError, match="servidor externo"):
         asyncio.run(llm.generar("TEXTO CONFIDENCIAL DEL DOCUMENTO", modelo="mi-modelo:latest"))
-    # Solo se ha consultado /api/show: el texto no ha salido hacia Ollama.
-    assert [(m, u.rsplit("/api/", 1)[1]) for m, u, _ in ollama.llamadas] == [("POST", "show")]
+    # Solo se consultan metadatos del motor y del modelo.
+    assert [(m, u.rsplit("/api/", 1)[1]) for m, u, _ in ollama.llamadas] == [("GET", "version"), ("GET", "status"), ("POST", "show")]
     assert "CONFIDENCIAL" not in repr(ollama.llamadas)
+
+@pytest.mark.parametrize("motor", [
+    _Ollama(version="0.21.2"), _Ollama(version=None), _Ollama(version="0.35.0-rc1"),
+    _Ollama(estado={}), _Ollama(estado={"cloud": {"disabled": False}}),
+    _Ollama(estado={"cloud": {"disabled": "true"}}),
+])
+@pytest.mark.parametrize("imagenes", [None, [b"imagen sintetica"]])
+def test_motor_incompatible_detiene_texto_e_imagen_antes_del_envio(monkeypatch, motor, imagenes):
+    motor.llamadas.clear()
+    _instalar(monkeypatch, motor)
+    monkeypatch.setattr(llm, "_RUNTIME_CFG", {"sistema": "s", "opciones": {}})
+    with pytest.raises(RuntimeError):
+        asyncio.run(llm.generar("texto sintetico", modelo="gemma4:e2b", imagenes=imagenes))
+    assert all(metodo == "GET" for metodo, _, _ in motor.llamadas)

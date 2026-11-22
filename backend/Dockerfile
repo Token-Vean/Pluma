@@ -7,13 +7,29 @@
 # Ejecuta como usuario no privilegiado (uid 10001).
 #
 # Reproducibilidad:
-#   - Imagen base Python fijada por tag de rama estable (3.12-slim-bookworm).
+#   - Imagen base Python fijada por tag de rama estable (3.12-slim-trixie).
 #   - Dependencias fijadas en requirements.txt (versión exacta).
 #   - Sin llamadas de red durante el runtime salvo a Ollama (ver
 #     CUMPLIMIENTO.md).
 # =============================================================================
 
-ARG PYTHON_IMAGE=python:3.12-slim-bookworm
+ARG PYTHON_IMAGE=python:3.12-slim-trixie
+# PlumA entrega imágenes locales al OCR por stdin. Compilar la herramienta de
+# Debian sin lectores de archivos comprimidos ni HTTP elimina libarchive/libxml2
+# de la imagen final y conserva las bibliotecas de imagen y los idiomas.
+FROM ${PYTHON_IMAGE} AS ocr
+WORKDIR /src
+RUN sed -i 's/^Types: deb$/Types: deb deb-src/' /etc/apt/sources.list.d/debian.sources \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends build-essential cmake pkg-config libleptonica-dev dpkg-dev ca-certificates \
+ && apt-get source tesseract \
+ && cd tesseract-*/ \
+ && cmake -S . -B /tmp/ocr -DCMAKE_BUILD_TYPE=Release -DBUILD_TRAINING_TOOLS=OFF \
+      -DGRAPHICS_DISABLED=ON -DDISABLE_ARCHIVE=ON -DDISABLE_CURL=ON -DBUILD_SHARED_LIBS=OFF \
+ && cmake --build /tmp/ocr --target tesseract --parallel 2 \
+ && install -Ds /tmp/ocr/bin/tesseract /out/bin/tesseract \
+ && install -Dm644 debian/copyright /out/doc/copyright
+
 FROM ${PYTHON_IMAGE} AS builder
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -37,7 +53,7 @@ RUN pip install --prefix=/install -r requirements.txt
 FROM ${PYTHON_IMAGE}
 
 LABEL org.opencontainers.image.title="PlumA" \
-      org.opencontainers.image.version="0.7.3" \
+      org.opencontainers.image.version="0.7.4" \
       org.opencontainers.image.description="PlumA local-first archival description assistant"
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -48,15 +64,18 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 RUN apt-get update && apt-get upgrade -y --no-install-recommends \
     && apt-get install -y --no-install-recommends \
         libjpeg62-turbo \
-        libpng16-16 \
+        libpng16-16t64 \
         libtiff6 \
         libwebp7 \
-        libxml2 \
-        libxslt1.1 \
-        tesseract-ocr \
+        libleptonica6 libgomp1 \
+        tesseract-ocr-osd \
         tesseract-ocr-spa \
         tesseract-ocr-eng \
     && rm -rf /var/lib/apt/lists/*
+
+COPY --from=ocr /out/bin/tesseract /usr/local/bin/tesseract
+COPY --from=ocr /out/doc/copyright /usr/share/doc/tesseract-ocr/copyright
+ENV TESSDATA_PREFIX=/usr/share/tesseract-ocr/5/tessdata
 
 # Usuario no privilegiado
 RUN groupadd --system --gid 10001 appgroup \

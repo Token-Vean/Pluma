@@ -45,7 +45,7 @@ if /I "!MODO!"=="host" (
     set "COMPOSE_PROFILES=bundled"
     echo Modo: container ^(se levantara el Ollama de Docker^)
 )
-docker image inspect pluma-app:0.7.3 >nul 2>&1
+docker image inspect pluma-app:0.7.4 >nul 2>&1
 if errorlevel 1 (
     echo Imagen de PlumA no encontrada. Construyendo por primera vez ^(puede tardar^)...
     docker compose up -d --build
@@ -62,25 +62,12 @@ echo OK - Servicios arrancados
 
 echo.
 echo [3/3] Esperando a que la aplicacion responda...
-set PUERTO=8082
-if exist .env (
-    for /f "tokens=2 delims==" %%a in ('findstr /b "PUERTO=" .env 2^>nul') do set PUERTO=%%a
+set "PUERTO=8082"
+call "%~dp0tools\windows\pluma-wait-ready.bat"
+if errorlevel 1 (
+    pause
+    exit /b 1
 )
-set MAX_INTENTOS=30
-set INTENTO=0
-:wait_loop
-set /a INTENTO+=1
-curl -sfm 2 http://localhost:!PUERTO!/api/estado >nul 2>&1
-if not errorlevel 1 goto wait_ok
-if !INTENTO! GEQ !MAX_INTENTOS! goto wait_timeout
-timeout /t 1 /nobreak >nul
-goto wait_loop
-:wait_ok
-echo OK - Aplicacion lista
-goto open
-:wait_timeout
-echo AVISO - PlumA tarda mas de lo habitual. Puede estar cargando el modelo.
-:open
 echo.
 echo Abriendo PlumA en el navegador...
 start "" "http://localhost:!PUERTO!"

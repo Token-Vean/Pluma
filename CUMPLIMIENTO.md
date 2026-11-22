@@ -165,8 +165,7 @@ Los logs no contienen, deliberadamente:
 - Texto extraído de los documentos.
 - Valores propuestos por la IA para los campos.
 - Evidencias citadas del documento.
-- Nombres de ficheros originales (se registra solo su hash si es
-  necesario, nunca el contenido).
+- Nombres de ficheros originales. La ficha descargada por el archivero sí contiene los nombres y las huellas.
 - Datos personales identificados en los documentos.
 
 Esto es verificable buscando en el código la función
@@ -217,12 +216,12 @@ proporcionalidad (RGPD art. 5.1.c).
 
 ### Limitaciones conocidas del despliegue actual
 
-En el estado actual del proyecto (versión 0.7.2), estas
+En el estado actual del proyecto (versión 0.7.4), estas
 limitaciones residuales se reconocen y se revisarán en versiones futuras:
 
 - **El contenedor de Ollama en perfil `bundled` corre como root**
   por la configuración por defecto de la imagen oficial
-  `ollama/ollama:0.21.2`. Esto es visible por cualquiera que
+  `ollama/ollama:0.40.17`. Esto es visible por cualquiera que
   inspeccione el contenedor; aunque no compromete los datos del
   anfitrión (Docker aísla el espacio de nombres), sí es un aspecto
   a mejorar. No aplica al perfil `host`, donde no gestionamos
@@ -406,7 +405,7 @@ flujo documental sigue siendo idéntico:
 - La ficha técnica de auditoría registra ahora el modelo base real
   ejecutado (`gemma4:e2b`, `gemma3:12b`, etc.) en lugar del alias
   derivado. Para reproducir una ejecución basta con el SHA del commit
-  del repo, el nombre del modelo base y el SHA-256 del documento.
+  del repo, el nombre del modelo base y las huellas SHA-256 de los originales y del envío.
 - El system prompt es un fichero de texto plano legible directamente
   por el archivero, sin necesidad de inspeccionar configuración interna
   del motor de IA. Un responsable de un archivo puede revisar
@@ -437,7 +436,7 @@ generada por la aplicación):
 
 - SHA del commit del repo de PlumA utilizado.
 - Nombre y versión del modelo base de Ollama.
-- SHA-256 del fichero documental procesado.
+- SHA-256 de los bytes de cada fichero y SHA-256 del envío, que incluye nombres y orden.
 - Norma aplicada y modo de extracción.
 
 Con estos cuatro identificadores, una ejecución pasada es plenamente

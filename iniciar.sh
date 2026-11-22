@@ -70,18 +70,17 @@ ok "Servicios arrancados"
 
 paso "Esperando a que la aplicación responda"
 PUERTO=8082
-if [[ -f .env ]]; then
-    val=$(grep '^PUERTO=' .env | head -1 | cut -d= -f2- || true)
-    [[ -n "$val" ]] && PUERTO="$val"
-fi
 listo=false
-for _ in {1..30}; do
-    if command -v curl >/dev/null 2>&1 && curl -sfm 2 "http://localhost:$PUERTO/api/estado" >/dev/null; then
-        listo=true; break
-    fi
-    sleep 1
+for _ in {1..90}; do
+  estado="$(curl --noproxy '*' -sfm 2 "http://127.0.0.1:$PUERTO/api/estado" 2>/dev/null || true)"
+  if [[ "$estado" =~ \"listo\"[[:space:]]*:[[:space:]]*true ]]; then listo=true; break; fi
+  if [[ "$estado" =~ \"fase\"[[:space:]]*:[[:space:]]*\"error\" ]]; then
+    fallar "El motor no está listo. Consulte http://127.0.0.1:$PUERTO/api/estado para ver el motivo."
+  fi
+  sleep 2
 done
-[[ "$listo" == true ]] && ok "Aplicación lista" || avisar "PlumA puede estar cargando el modelo."
+[[ "$listo" == true ]] || fallar "El motor no está listo. Consulte http://127.0.0.1:$PUERTO/api/estado."
+ok "Aplicación lista"
 
 URL="http://localhost:$PUERTO"
 echo ""

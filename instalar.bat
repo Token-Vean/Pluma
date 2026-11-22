@@ -138,21 +138,11 @@ echo [5/6] Esperando a que la aplicacion responda...
 REM Puerto fijo por diseno en la release local bloqueada. Debe coincidir con
 REM `published` en docker-compose.yml; no se lee de .env.
 set "PUERTO=8082"
-set MAX_INTENTOS=30
-set INTENTO=0
-:wait_loop
-set /a INTENTO+=1
-curl -sfm 2 http://127.0.0.1:!PUERTO!/api/estado >nul 2>&1
-if not errorlevel 1 goto wait_ok
-if !INTENTO! GEQ !MAX_INTENTOS! goto wait_timeout
-timeout /t 1 /nobreak >nul
-goto wait_loop
-:wait_ok
-echo OK - Aplicacion lista
-goto open
-:wait_timeout
-echo AVISO - PlumA tarda mas de lo habitual. Puede estar esperando a Ollama.
-:open
+call "%~dp0tools\windows\pluma-wait-ready.bat"
+if errorlevel 1 (
+    pause
+    exit /b 1
+)
 echo.
 echo [6/6] Abriendo PlumA...
 start "" "http://127.0.0.1:!PUERTO!"

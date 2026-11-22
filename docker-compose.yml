@@ -40,8 +40,7 @@
 #   elimina de .env las variables sensibles, pero OLLAMA_IMAGE quedaba fuera
 #   de esa lista y permitía sustituir desde un .env manipulado precisamente
 #   el contenedor que recibe el texto íntegro de los documentos y que tiene
-#   salida a Internet. Pendiente: fijar también por digest sha256 tras
-#   validar un build conocido-bueno (ver KNOWN_ISSUES.md).
+#   salida a Internet durante la descarga. Desde 0.7.4 se fija también el digest.
 # - `restart: "no"` también en Ollama: con unless-stopped, Ollama rearrancaba
 #   con cada inicio de Docker Desktop ocupando varios GB de RAM aunque el
 #   usuario no estuviera usando PlumA.
@@ -81,8 +80,10 @@ services:
     # Imagen fijada deliberadamente en el fichero, sin override desde .env.
     # Para cambiarla hay que editar este fichero: es una decisión consciente
     # y auditable, no una variable de entorno.
-    image: ollama/ollama:0.21.2
+    image: ollama/ollama:0.40.17@sha256:ccc42bcd3d5fcf7ab0d532b300382154e1a4da56fc666bdb313b78ebdd912754
     container_name: pluma-ollama
+    environment:
+      OLLAMA_NO_CLOUD: "1"
     profiles:
       - bundled
     volumes:
@@ -103,7 +104,7 @@ services:
     cpus: 4
 
   app:
-    image: pluma-app:0.7.3
+    image: pluma-app:0.7.4
     build: ./backend
     # Imagen construida en local; nunca se descarga de un registro.
     pull_policy: never
@@ -202,7 +203,7 @@ services:
     tmpfs:
       - /tmp:size=512M,mode=1777
     healthcheck:
-      test: ["CMD", "python", "-c", "import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:' + os.environ.get('PUERTO', '8081') + '/api/estado', timeout=3).read()"]
+      test: ["CMD", "python", "-c", "import json, sys, urllib.request; sys.exit(json.load(urllib.request.urlopen('http://127.0.0.1:8081/api/estado', timeout=3)).get('listo') is not True)"]
       interval: 30s
       timeout: 5s
       retries: 3

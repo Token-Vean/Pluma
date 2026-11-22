@@ -74,7 +74,7 @@ fi
 #     .env heredado de una instalación anterior no deje residuos que
 #     induzcan a pensar que siguen siendo configurables.
 CLAVES_BLOQUEADAS="OLLAMA_URL ALLOW_REMOTE_OLLAMA ALLOW_NETWORK_EXPOSURE \
-PLUMA_STRICT_LOCAL PERFIL COMPOSE_PROFILES MODELO_NOMBRE MODELFILE_PATH \
+PLUMA_STRICT_LOCAL OLLAMA_NO_CLOUD PERFIL COMPOSE_PROFILES MODELO_NOMBRE MODELFILE_PATH \
 PLUMA_OLLAMA_MODE PLUMA_OLLAMA_URL USAR_SANDBOX_PARSERS \
 SANDBOX_TIMEOUT_SEGUNDOS SANDBOX_MEMORIA_MB \
 INCLUIR_HASH_DOCUMENTO_AUDITORIA PERMITIR_APAGADO_UI"
@@ -137,41 +137,21 @@ paso "Detectando Ollama nativo en el host"
 MODELO_BASE=$(grep '^MODELO_BASE=' .env | head -1 | cut -d= -f2- || true)
 [[ -z "$MODELO_BASE" ]] && MODELO_BASE="gemma4:e2b"
 
-extraer_modelos(){
-  grep -oE '"name"[[:space:]]*:[[:space:]]*"[^"]*"' \
-    | sed -E 's/^"name"[[:space:]]*:[[:space:]]*"(.*)"$/\1/' || true
-}
-
-modelo_presente(){
-  local buscar="$1" n=""
-  while IFS= read -r n; do
-    [[ -z "$n" ]] && continue
-    if [[ "$n" == "$buscar" || "$n" == "${buscar}:latest" ]]; then
-      return 0
-    fi
-  done
-  return 1
-}
-
-TAGS_JSON=""
-MODELOS_DESCARGADOS=""
+# Comprobar desde el contenedor garantiza que el servidor nativo también sea
+# alcanzable por la aplicación. El intérprete y los controles son los de PlumA.
 PERFIL_ELEGIDO="bundled"
-if command -v curl >/dev/null 2>&1 && curl -sfm 2 "http://127.0.0.1:11434/api/tags" >/dev/null 2>&1; then
-  TAGS_JSON="$(curl -sfm 2 "http://127.0.0.1:11434/api/tags" 2>/dev/null || true)"
-  MODELOS_DESCARGADOS="$(printf '%s' "$TAGS_JSON" | extraer_modelos)"
-  if [[ -n "$MODELOS_DESCARGADOS" ]]; then
+if command -v curl >/dev/null && curl --noproxy '*' -fsSm 2 "http://127.0.0.1:11434/api/version" >/dev/null 2>&1; then
+  "${COMPOSE[@]}" build app || fallar "No se pudo construir la aplicación."
+  if "${COMPOSE[@]}" run --rm --no-deps -T \
+      -e OLLAMA_URL=http://host.docker.internal:11434 -e PLUMA_OLLAMA_MODE=host \
+      app python -m app.bootstrap; then
     PERFIL_ELEGIDO="host"
-    if printf '%s\n' "$MODELOS_DESCARGADOS" | modelo_presente "$MODELO_BASE"; then
-      ok "Ollama del host responde y tiene $MODELO_BASE"
-    else
-      PRIMERO_MODELO="$(printf '%s\n' "$MODELOS_DESCARGADOS" | head -1)"
-      avisar "Ollama del host responde, pero no tiene $MODELO_BASE. PlumA usará otro modelo local disponible: $PRIMERO_MODELO"
-    fi
+    ok "El motor nativo es compatible, tiene un modelo local y tiene desactivada la nube."
   else
-    avisar "Ollama del host responde, pero no hay modelos. Se usará el perfil bundled."
+    avisar "No se pudo verificar el motor nativo desde PlumA. Se usará el motor de Docker."
   fi
 else
-  avisar "Ollama nativo no responde. Se usará el perfil bundled administrado por Docker."
+  avisar "Se usará el motor de Docker."
 fi
 
 # -----------------------------------------------------------------------------
@@ -226,19 +206,17 @@ ok "Servicios arrancados"
 # -----------------------------------------------------------------------------
 paso "Esperando a que la aplicación responda"
 PUERTO=8082
-if [[ -f .env ]]; then
-  val=$(grep '^PUERTO=' .env | head -1 | cut -d= -f2- || true)
-  [[ -n "$val" ]] && PUERTO="$val"
-fi
-
 listo=false
-for _ in {1..30}; do
-  if command -v curl >/dev/null 2>&1 && curl -sfm 2 "http://localhost:$PUERTO/api/estado" >/dev/null; then
-    listo=true; break
+for _ in {1..90}; do
+  estado="$(curl --noproxy '*' -sfm 2 "http://127.0.0.1:$PUERTO/api/estado" 2>/dev/null || true)"
+  if [[ "$estado" =~ \"listo\"[[:space:]]*:[[:space:]]*true ]]; then listo=true; break; fi
+  if [[ "$estado" =~ \"fase\"[[:space:]]*:[[:space:]]*\"error\" ]]; then
+    fallar "El motor no está listo. Consulte http://127.0.0.1:$PUERTO/api/estado para ver el motivo."
   fi
-  sleep 1
+  sleep 2
 done
-[[ "$listo" == true ]] && ok "Aplicación lista" || avisar "PlumA puede seguir arrancando o esperando a Ollama."
+[[ "$listo" == true ]] || fallar "El motor no está listo. Consulte http://127.0.0.1:$PUERTO/api/estado."
+ok "Aplicación lista"
 
 URL="http://localhost:$PUERTO"
 echo ""

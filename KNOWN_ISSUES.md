@@ -1,7 +1,7 @@
 # Problemas conocidos y riesgos residuales
 
 Este documento recoge los problemas conocidos de PlumA en su versión
-**0.7.3**. Está pensado para que cualquier persona que evalúe la
+**0.7.4**. Está pensado para que cualquier persona que evalúe la
 herramienta para un piloto, una auditoría, o un despliegue controlado,
 sepa de antemano qué limitaciones existen.
 
@@ -14,7 +14,7 @@ Este fichero describe únicamente el estado vigente. El histórico de
 problemas resueltos en versiones anteriores está en `CHANGELOG.md` y en
 las notas de cada release de GitHub.
 
-## Pendientes y riesgos residuales — v0.7.3
+## Pendientes y riesgos residuales — v0.7.4
 
 ### Modelo de amenaza CSRF
 
@@ -37,40 +37,13 @@ actualizado, sin software de origen desconocido, y bajo el control del
 archivero que la usa. No debe exponerse a redes locales con varios
 usuarios sin antes añadir autenticación real.
 
-### Imágenes Docker no fijadas por digest
+### Imagen base de Python
 
-El `Dockerfile` actual referencia las imágenes base por tag:
-
-```
-FROM python:3.12-slim AS builder
-```
-
-Y `docker-compose.yml` referencia Ollama por tag fijado en el propio
-fichero (ya no es configurable por variable de entorno):
-
-```
-image: ollama/ollama:0.21.2
-```
-
-Si las imágenes en Docker Hub se actualizan o se ven comprometidas, el
-siguiente `docker compose build` / `pull` producirá una imagen distinta
-sin que el usuario lo note.
-
-**Mitigación pendiente**: una vez exista un build "bueno conocido" de la
-beta, fijar las imágenes por su digest SHA256:
-
-```
-FROM python:3.12-slim-bookworm@sha256:XXXXXXXXX...
-image: ollama/ollama:0.21.2@sha256:YYYYYYYYY...
-```
-
-Esto se hará tras el primer ciclo de pruebas con archiveros reales para
-fijar versiones validadas en la release candidate.
+El Dockerfile utiliza `python:3.12-slim-trixie` por etiqueta. Una reconstrucción puede incorporar actualizaciones de Debian y Python. El motor Ollama del perfil Docker está fijado por etiqueta y digest en Compose.
 
 ### Falta de fuzzing y cobertura ampliada de tests
 
-Los tests actuales (`tests/`) son **32 tests** que pasan en entorno local y cubren los vectores de ataque más
-obvios y la configuración de release:
+Las pruebas cubren, entre otros aspectos:
 
 - Extensión falseada (binario llamado `.pdf`).
 - ZIP no-DOCX rechazado.
@@ -230,15 +203,9 @@ alcanzable desde el contenedor mediante `host.docker.internal`; por ello el
 perfil `bundled` es la opción recomendada. La sección "Endurecimiento de
 Ollama nativo" de `INSTALACION.md` lo documenta.
 
-### Imagen oficial `ollama/ollama` no escaneada
+### Actualizaciones del motor
 
-El workflow `.github/workflows/security-checks.yml` ejecuta Trivy sobre
-`pluma-app:0.7.3` (la imagen que construimos). La imagen
-`ollama/ollama:0.21.2` que se usa en el perfil bundled no se escanea: es
-upstream y no la construimos nosotros. Los CVEs de Ollama deben
-monitorizarse en sus releases. Mantener la versión fijada en
-`docker-compose.yml` permite cambiarla deliberadamente cuando upstream
-publique parches relevantes.
+El flujo de seguridad comprueba tanto la imagen de la aplicación como el digest de Ollama declarado en Compose. El administrador del equipo gestiona las actualizaciones de un Ollama nativo.
 
 ## Cómo reportar nuevos problemas
 

@@ -530,12 +530,10 @@ def _ocr_imagen_tesseract(imagen: bytes, *, indice: int | None = None) -> str:
             timeout=OCR_TIMEOUT_SEGUNDOS,
         )
         if proc.returncode != 0:
-            detalle = (proc.stderr or b"").decode("utf-8", errors="replace").strip()
             logger.info(
-                "OCR local sin resultado%s: tesseract rc=%s %s",
+                "OCR local sin resultado%s: tesseract rc=%s",
                 f" imagen={indice}" if indice is not None else "",
                 proc.returncode,
-                detalle[:300],
             )
             return ""
         return (proc.stdout or b"").decode("utf-8", errors="replace").strip()
@@ -543,7 +541,7 @@ def _ocr_imagen_tesseract(imagen: bytes, *, indice: int | None = None) -> str:
         logger.info("OCR local cancelado por timeout%s", f" imagen={indice}" if indice is not None else "")
         return ""
     except Exception as exc:
-        logger.info("OCR local falló%s: %s", f" imagen={indice}" if indice is not None else "", exc)
+        logger.info("OCR local falló%s: %s", f" imagen={indice}" if indice is not None else "", type(exc).__name__)
         return ""
     finally:
         if tmp_path:
@@ -567,8 +565,7 @@ def _ocr_imagenes(imagenes: list[bytes], *, nombre_origen: str = "documento") ->
             partes.append(f"[OCR local - {etiqueta_origen} - página/imagen {i}]\n{texto.strip()}")
         elif texto:
             logger.info(
-                "OCR local descartado por baja calidad en %s imagen %d (%d caracteres)",
-                etiqueta_origen,
+                "OCR local descartado por baja calidad en imagen %d (%d caracteres)",
                 i,
                 len(texto),
             )
