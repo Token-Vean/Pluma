@@ -94,6 +94,20 @@ jobs:
       - name: Build PlumA image
         if: matrix.servicio == 'app'
         run: docker compose build app
+      - name: Run real Spanish and English OCR in the runtime image
+        if: matrix.servicio == 'app'
+        run: |
+          app="$(docker compose config --format json | jq -er '.services.app.image')"
+          docker run --rm -i --network none "$app" python - <<'PYTHON'
+          import io
+          from PIL import Image, ImageDraw, ImageFont
+          from app.router import _ocr_imagen_tesseract
+          imagen = Image.new("RGB", (600, 100), "white")
+          ImageDraw.Draw(imagen).text((15, 15), "DOCUMENTO LOCAL 2026", fill="black", font=ImageFont.load_default(size=38))
+          datos = io.BytesIO()
+          imagen.save(datos, format="PNG")
+          assert "DOCUMENTO" in _ocr_imagen_tesseract(datos.getvalue()).upper()
+          PYTHON
       - name: Select exact image from Compose
         id: image
         env:

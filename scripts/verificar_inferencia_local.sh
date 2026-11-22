@@ -30,21 +30,34 @@ else
   motor="$(docker run -d --entrypoint sleep "$app" 3600)"
   netpid="$(docker inspect -f '{{.State.Pid}}' "$motor")"
   resolv="$(docker inspect -f '{{.ResolvConfPath}}' "$motor")"
-  cli=(sudo unshare --mount --propagation private bash -c 'mount --bind "$1" /etc/resolv.conf; shift; exec "$@"' _ "$resolv"
-    nsenter -t "$netpid" -n -- runuser -u "$(id -un)" -- env "HOME=$prueba" OLLAMA_HOST=127.0.0.1:11434 OLLAMA_NO_CLOUD=1 "$prueba/bin/ollama")
-  "${cli[@]}" serve >"$prueba/motor.log" 2>&1 &
+  ejecutar=(sudo unshare --mount --propagation private bash -c 'mount --bind "$1" /etc/resolv.conf; shift; exec "$@"' _ "$resolv"
+    nsenter -t "$netpid" -n -- runuser -u "$(id -un)" -- env "HOME=$prueba" OLLAMA_HOST=127.0.0.1:11434 OLLAMA_NO_CLOUD=1)
+  cli=("${ejecutar[@]}" "$prueba/bin/ollama")
+  arrancar_nativo() {
+    "${ejecutar[@]}" bash -c 'echo $$ > "$1"; exec "$2" serve' _ "$prueba/servidor.pid" "$prueba/bin/ollama" >"$prueba/motor.log" 2>&1 &
+  }
+  arrancar_nativo
 fi
 for _ in {1..60}; do "${cli[@]}" list >/dev/null 2>&1 && break; sleep 1; done
 "${cli[@]}" pull "$MODELO_BASE"
 
 if [[ "$modo" == bundled ]]; then
+  # Separar la descarga de la inferencia, cerrando las conexiones del registro.
+  docker compose --profile bundled restart ollama
   docker compose up -d --no-build app
   cliente="$(docker compose ps -q app)"
 else
+  servidor="$(cat "$prueba/servidor.pid")"
+  kill -TERM "$servidor"
+  for _ in {1..30}; do kill -0 "$servidor" 2>/dev/null || break; sleep 1; done
+  if kill -0 "$servidor" 2>/dev/null; then echo "El motor no se detuvo"; exit 1; fi
+  arrancar_nativo
   cliente="$(docker run -d --network "container:$motor" -v "$PWD/schemas:/app/schemas:ro" \
     -e OLLAMA_URL=http://127.0.0.1:11434 -e PLUMA_OLLAMA_MODE=host --entrypoint sleep "$app" 3600)"
 fi
 # app tiene rootfs de solo lectura; ejecutar por stdin conserva su configuración.
+for _ in {1..60}; do "${cli[@]}" list >/dev/null 2>&1 && break; sleep 1; done
+"${cli[@]}" list >/dev/null
 contenedores=("$motor")
 if [[ "$modo" == bundled ]]; then contenedores+=("$cliente"); fi
 filtro='(ip or ip6) and not (dst net 127.0.0.0/8 or dst host ::1'
@@ -54,6 +67,9 @@ for id in "${contenedores[@]}"; do
   done < <(docker inspect "$id" | jq -r '.[0].NetworkSettings.Networks[] | .IPAddress, .GlobalIPv6Address' | sed '/^$/d')
 done
 filtro+=')'
+# Los mensajes ICMPv6 de descubrimiento de vecinos/routers y pertenencia a
+# grupos ff02 permanecen en el enlace local. Se contabilizan por separado.
+control='ip6 protochain 58 and dst net ff02::/16'
 for i in "${!contenedores[@]}"; do
   pid="$(docker inspect -f '{{.State.Pid}}' "${contenedores[$i]}")"
   sudo nsenter -t "$pid" -n -- bash -c 'echo $$ > "$1"; exec tcpdump -Z root -ni any -U -s 96 -w "$2" "ip or ip6"' \
@@ -71,11 +87,12 @@ for i in "${!contenedores[@]}"; do
   for _ in {1..10}; do grep -q 'packets dropped by kernel' "$prueba/$i.log" && break; sleep 1; done
   grep -Eq '^0 packets dropped by kernel' "$prueba/$i.log"
   # En ambos sentidos se exige tráfico al motor para descartar una captura vacía.
-  externos="$(sudo tcpdump -nn -r "$prueba/$i.pcap" "$filtro" 2>/dev/null | wc -l)"
+  externos="$(sudo tcpdump -nn -r "$prueba/$i.pcap" "($filtro) and not ($control)" 2>/dev/null | wc -l)"
   locales="$(sudo tcpdump -nn -r "$prueba/$i.pcap" 'tcp port 11434' 2>/dev/null | wc -l)"
-  echo "Perfil $modo, captura $i: $locales paquetes de inferencia y $externos paquetes a otros destinos."
+  enlace="$(sudo tcpdump -nn -r "$prueba/$i.pcap" "$control" 2>/dev/null | wc -l)"
+  echo "Perfil $modo, captura $i: $locales paquetes de inferencia, $enlace de control IPv6 de enlace local y $externos a otros destinos."
   if [[ "$externos" -gt 0 ]]; then
-    sudo tcpdump -qnn -r "$prueba/$i.pcap" "$filtro"
+    sudo tcpdump -nn -r "$prueba/$i.pcap" "($filtro) and not ($control)"
   fi
   if [[ "$locales" -eq 0 || "$externos" -ne 0 ]]; then exito=false; fi
 done

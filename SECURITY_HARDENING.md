@@ -13,7 +13,7 @@ formativa.
 - Se adopta flujo **text-first / OCR-first**: los PDF con capa textual suficiente no se re-OCRizan; los PDF escaneados e imágenes pasan por Tesseract local antes de recurrir a visión multimodal.
 - La visión multimodal queda como fallback para manuscritos o documentos donde OCR local no extrae texto suficiente.
 - La imagen final elimina `pip`, `setuptools` y `wheel` del runtime. La aplicación no instala paquetes en ejecución; esto reduce superficie y elimina las vulnerabilidades corregibles detectadas por Docker Scout en `pip`.
-- La imagen base pasa a `python:3.12-slim-bookworm` como rama conservadora para la línea 0.7.x.
+- Desde 0.7.4, el backend utiliza `python:3.12-slim-trixie`. El OCR conserva la entrada de imágenes y los idiomas de Debian. La compilación excluye la descarga HTTP y los formatos de archivo comprimido, ajenos a la ruta de OCR de PlumA.
 - Se documenta el criterio de aceptación de CVE para release local: 0 críticas, 0 altas corregibles y 0 medias corregibles; las vulnerabilidades sin versión corregida deben quedar justificadas y mitigadas por aislamiento local, usuario no privilegiado, `read_only`, `no-new-privileges`, límites de recursos y publicación exclusiva en loopback.
 - Se incorporan scripts de auditoría para Windows y POSIX en `scripts/auditar_seguridad.*`.
 
