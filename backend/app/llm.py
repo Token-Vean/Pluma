@@ -153,6 +153,31 @@ def validar_modelo_local(nombre: str) -> None:
 _CAMPOS_MODELO_REMOTO = ("remote_host", "remote_model")
 
 
+async def _datos_motor(cliente: httpx.AsyncClient, recurso: str) -> dict:
+    try:
+        respuesta = await cliente.get(f"{OLLAMA_URL}/api/{recurso}")
+        respuesta.raise_for_status()
+        datos = respuesta.json()
+    except (httpx.HTTPError, ValueError) as exc:
+        raise RuntimeError(f"No se pudo verificar /api/{recurso} del servidor Ollama.") from exc
+    if not isinstance(datos, dict):
+        raise RuntimeError(f"Respuesta inesperada del servidor Ollama en /api/{recurso}.")
+    return datos
+
+
+async def verificar_motor_local(cliente: httpx.AsyncClient) -> str:
+    """Verifica el servidor real, incluidos los cambios tras reiniciar Ollama."""
+    version = (await _datos_motor(cliente, "version")).get("version")
+    patron = r"v?(\d{1,5})\.(\d{1,5})\.(\d{1,5})(?:\+[0-9A-Za-z.-]+)?"
+    numeros = re.fullmatch(patron, version) if isinstance(version, str) else None
+    if not numeros or tuple(map(int, numeros.groups())) < (0, 35, 0):
+        raise RuntimeError("PlumA requiere una versión estable de Ollama 0.35.0 o posterior. Actualice el servidor.")
+    nube = (await _datos_motor(cliente, "status")).get("cloud")
+    if not isinstance(nube, dict) or nube.get("disabled") is not True:
+        raise RuntimeError("Active OLLAMA_NO_CLOUD=1 en el servidor Ollama y reinícielo, o utilice el perfil Docker de PlumA.")
+    return version
+
+
 def es_entrada_remota(entrada: Any) -> bool:
     """True si los metadatos de Ollama declaran el modelo como remoto.
 
@@ -177,6 +202,7 @@ async def verificar_modelo_local(nombre: str) -> None:
     validar_modelo_local(nombre)
     try:
         async with cliente_local(TIMEOUT_VERIFICACION_MODELO) as cliente:
+            await verificar_motor_local(cliente)
             resp = await cliente.post(f"{OLLAMA_URL}/api/show", json={"model": nombre})
     except httpx.HTTPError as err:
         raise RuntimeError(
@@ -205,6 +231,19 @@ async def verificar_modelo_local(nombre: str) -> None:
             "PlumA está bloqueado para procesamiento local y rechaza modelos remotos de Ollama: "
             f"{nombre} delega la inferencia en un servidor externo, aunque su nombre no lleve "
             "la etiqueta :cloud. Seleccione un modelo descargado en este equipo."
+        )
+    detalles = datos.get("details")
+    info = datos.get("model_info")
+    formato = detalles.get("format") if isinstance(detalles, dict) else None
+    familia = detalles.get("family") if isinstance(detalles, dict) else None
+    arquitectura = info.get("general.architecture") if isinstance(info, dict) else None
+    # GGUF declara formato y familia; otros formatos pueden exponer la
+    # arquitectura en model_info. Exigir dos campos evita aceptar objetos vacíos.
+    identificadores = (formato, familia, arquitectura)
+    if sum(isinstance(v, str) and bool(v.strip()) for v in identificadores) < 2:
+        raise RuntimeError(
+            f"No se pudo comprobar en Ollama que el modelo {nombre} es local "
+            "(metadatos locales de formato, familia o arquitectura insuficientes). No se envía el documento."
         )
 
 
@@ -831,15 +870,14 @@ async def _post_generate(
 ) -> str:
     resp = await cliente.post(f"{OLLAMA_URL}/api/generate", json=payload)
     if resp.is_error:
-        detalle = (resp.text or "").strip().replace("\n", " ")[:1200]
         if resp.status_code >= 500:
             raise RuntimeError(
                 f"Ollama devolvió HTTP {resp.status_code} en /api/generate. "
                 f"La causa exacta debe comprobarse en los logs de Ollama; "
                 f"puede deberse a memoria insuficiente, formato de petición, tamaño de contexto "
-                f"o error interno del motor. Detalle: {detalle}"
+                "o error interno del motor."
             )
-        raise RuntimeError(f"Ollama devolvió HTTP {resp.status_code}: {detalle}")
+        raise RuntimeError(f"Ollama devolvió HTTP {resp.status_code}.")
     data = resp.json()
     _log_metricas_ollama(data, "/api/generate", str(payload.get("model") or ""))
     respuesta = data.get("response")
@@ -865,15 +903,14 @@ async def _post_chat(
 ) -> str:
     resp = await cliente.post(f"{OLLAMA_URL}/api/chat", json=payload)
     if resp.is_error:
-        detalle = (resp.text or "").strip().replace("\n", " ")[:1200]
         if resp.status_code >= 500:
             raise RuntimeError(
                 f"Ollama devolvió HTTP {resp.status_code} en /api/chat. "
                 f"La causa exacta debe comprobarse en los logs de Ollama; "
                 f"puede deberse a memoria insuficiente, formato de petición, tamaño de contexto "
-                f"o error interno del motor. Detalle: {detalle}"
+                "o error interno del motor."
             )
-        raise RuntimeError(f"Ollama devolvió HTTP {resp.status_code}: {detalle}")
+        raise RuntimeError(f"Ollama devolvió HTTP {resp.status_code}.")
     data = resp.json()
     _log_metricas_ollama(data, "/api/chat", str(payload.get("model") or ""))
     mensaje = data.get("message")
@@ -1014,10 +1051,9 @@ async def generar(
             if _es_error_gramatica_json_ollama(resp.status_code, detalle):
                 logger.warning(
                     "Ollama rechazó la salida estructurada (%s) con modelo=%s; "
-                    "reintentando sin format: %s",
+                    "reintentando sin format",
                     "esquema" if isinstance(formato, dict) else "json",
                     modelo_final,
-                    detalle[:300],
                 )
                 payload_blando = dict(payload)
                 payload_blando.pop("format", None)
@@ -1027,9 +1063,9 @@ async def generar(
                     f"Ollama devolvió HTTP {resp.status_code} en /api/generate. "
                     f"La causa exacta debe comprobarse en los logs de Ollama; "
                     f"puede deberse a memoria insuficiente, formato de petición, tamaño de contexto "
-                    f"o error interno del motor. Detalle: {detalle}"
+                    "o error interno del motor."
                 )
-            raise RuntimeError(f"Ollama devolvió HTTP {resp.status_code}: {detalle}")
+            raise RuntimeError(f"Ollama devolvió HTTP {resp.status_code}.")
         data = resp.json()
         _log_metricas_ollama(data, "/api/generate", str(payload.get("model") or ""))
         respuesta = data.get("response")

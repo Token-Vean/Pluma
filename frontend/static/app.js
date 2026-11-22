@@ -104,7 +104,7 @@ function escapeHtml(s) {
 const I18N = {
   es: {
     'brand.title': 'PlumA',
-    'brand.subtitle': 'Descripción asistida · v0.7.3',
+    'brand.subtitle': 'Descripción asistida · v0.7.4',
     'language.label': 'Idioma',
     'language.title': 'Idioma de la interfaz',
     'engine.statusTitle': 'Estado del motor de IA',
@@ -224,7 +224,9 @@ const I18N = {
     'audit.standard': 'Norma',
     'audit.mode': 'Modo',
     'audit.sandbox': 'Sandbox de parsers',
-    'audit.sha256': 'SHA-256',
+    'audit.sha256': 'SHA-256 (ficha anterior)',
+    'audit.submissionHash': 'SHA-256 del envío',
+    'audit.originalHash': 'SHA-256 del original {n}',
     'audit.evidence': 'Control de evidencias',
     'evidence.localizada': 'evidencia verificada en texto',
     'evidence.no_localizada': 'evidencia no localizada en texto',
@@ -234,7 +236,7 @@ const I18N = {
   },
   en: {
     'brand.title': 'PlumA',
-    'brand.subtitle': 'Assisted description · v0.7.3',
+    'brand.subtitle': 'Assisted description · v0.7.4',
     'language.label': 'Language',
     'language.title': 'Interface language',
     'engine.statusTitle': 'AI engine status',
@@ -354,7 +356,9 @@ const I18N = {
     'audit.standard': 'Standard',
     'audit.mode': 'Mode',
     'audit.sandbox': 'Parser sandbox',
-    'audit.sha256': 'SHA-256',
+    'audit.sha256': 'SHA-256 (earlier report)',
+    'audit.submissionHash': 'Submission SHA-256',
+    'audit.originalHash': 'Original file {n} SHA-256',
     'audit.evidence': 'Evidence control',
     'evidence.localizada': 'evidence verified in text',
     'evidence.no_localizada': 'evidence not found in text',
@@ -1544,7 +1548,11 @@ function renderAuditoria(auditoria) {
     [t('audit.mode'), cfg.modo || '—'],
     [t('audit.model'), cfg.modelo || '—'],
     [t('audit.sandbox'), seg.sandbox_parsers_activo ? 'activo' : 'inactivo'],
-    [t('audit.sha256'), doc.sha256 || '—'],
+    [t('sha256_envio' in doc ? 'audit.submissionHash' : 'audit.sha256'), doc.sha256_envio || doc.sha256 || '—'],
+    ...(doc.archivos || []).map(archivo => [
+      t('audit.originalHash', { n: archivo.orden }) + ' · ' + archivo.nombre,
+      archivo.sha256 || '—',
+    ]),
     [t('audit.evidence'), `${ce.evidencias_localizadas || 0} localizadas · ${ce.evidencias_no_localizadas || 0} no localizadas · ${ce.evidencias_no_verificables_textualmente || 0} no verificables`],
   ];
 

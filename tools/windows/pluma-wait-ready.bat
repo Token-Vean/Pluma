@@ -5,9 +5,9 @@ set "SCRIPT_DIR=%~dp0"
 for %%I in ("%SCRIPT_DIR%\..\..") do set "PLUMA_DIR=%%~fI"
 cd /d "%PLUMA_DIR%"
 echo Esperando a que PlumA responda en http://127.0.0.1:8082 ...
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='SilentlyContinue'; $deadline=(Get-Date).AddSeconds(180); $ok=$false; while((Get-Date) -lt $deadline){ try { $r=Invoke-WebRequest -UseBasicParsing 'http://127.0.0.1:8082/api/estado' -TimeoutSec 4; if($r.StatusCode -eq 200){ Write-Host 'PlumA responde correctamente.'; $ok=$true; break } } catch { Write-Host ('Esperando servicio HTTP: ' + $_.Exception.Message) }; Start-Sleep -Seconds 3 }; if($ok){ exit 0 } else { exit 1 }"
+powershell -NoProfile -Command "$deadline=(Get-Date).AddSeconds(180); while((Get-Date) -lt $deadline){ try { $r=Invoke-RestMethod -ErrorAction Stop 'http://127.0.0.1:8082/api/estado' -MaximumRedirection 0 -TimeoutSec 4; if($r.listo -is [bool] -and $r.listo){Write-Host 'PlumA lista.'; exit 0}; if($r.fase -eq 'error'){Write-Host $r.mensaje; exit 1} } catch {}; Start-Sleep -Seconds 2 }; exit 1"
 if errorlevel 1 (
-  echo PlumA no ha respondido dentro del tiempo esperado.
+  echo No se ha podido verificar que PlumA este lista.
   echo.
   echo === Estado de contenedores ===
   docker compose ps

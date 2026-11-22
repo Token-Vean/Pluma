@@ -5,6 +5,11 @@ on:
   push:
     branches: [ main, master ]
   workflow_dispatch:
+    inputs:
+      publicar:
+        description: Publicar el ZIP de la versión comprobada desde main
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -59,19 +64,108 @@ jobs:
           PYTHONPATH: backend
         run: python -m pytest -q
 
+      - name: Validate Windows scripts and package
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($file in Get-ChildItem -Recurse -Filter *.ps1) {
+            $tokens = $null
+            $errors = $null
+            [void][Management.Automation.Language.Parser]::ParseFile($file.FullName, [ref]$tokens, [ref]$errors)
+            if ($errors) { throw ($errors -join "\n") }
+          }
+          python scripts/empaquetar_windows.py
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $zip = Get-Item dist/*.zip
+          $esperado = ((Get-Content ($zip.FullName + '.sha256')) -split ' ')[0]
+          if ((Get-FileHash $zip -Algorithm SHA256).Hash -ne $esperado) { throw 'SHA-256 incorrecto' }
+          Expand-Archive $zip -DestinationPath $env:RUNNER_TEMP/pluma-zip
+          $raiz = Get-ChildItem $env:RUNNER_TEMP/pluma-zip -Directory
+          if ((Get-Content ($raiz.FullName + '/REVISION.txt')) -notcontains "https://github.com/$env:GITHUB_REPOSITORY/commit/$env:GITHUB_SHA") { throw 'ZIP de otro commit' }
+
   container-scan:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        servicio: [app, ollama]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Build local image
+      - name: Build PlumA image
+        if: matrix.servicio == 'app'
         run: docker compose build app
-
-      - name: Trivy image scan
+      - name: Select exact image from Compose
+        id: image
+        env:
+          SERVICE: ${{ matrix.servicio }}
+        run: |
+          ref="$(docker compose --profile bundled config --format json | jq -er --arg s "$SERVICE" '.services[$s].image')"
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+      - name: Scan image
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
-          image-ref: 'pluma-app:0.7.3'
-          format: 'table'
-          severity: 'CRITICAL,HIGH'
-          ignore-unfixed: true
-          exit-code: '1'
+          image-ref: ${{ steps.image.outputs.ref }}
+          format: json
+          output: trivy-results.json
+          severity: MEDIUM,HIGH,CRITICAL
+          scanners: vuln
+          timeout: 30m
+      - name: Enforce published release policy
+        run: |
+          jq -er '.Results | type == "array" and length > 0' trivy-results.json
+          jq '[.Results[].Vulnerabilities[]? | select(.Severity == "CRITICAL" or
+            ((.Severity == "HIGH" or .Severity == "MEDIUM") and (.FixedVersion // "") != "")) |
+            {VulnerabilityID, PkgName, InstalledVersion, FixedVersion, Severity}]' trivy-results.json > bloqueantes.json
+          cat bloqueantes.json
+          jq -e 'length == 0' bloqueantes.json
+      - name: Archive image analysis
+        if: always() && hashFiles('trivy-results.json') != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: trivy-${{ matrix.servicio }}
+          path: trivy-results.json
+
+  inferencia-local:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        modo: [host, bundled]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install packet capture utility
+        run: command -v tcpdump || (sudo apt-get update -qq && sudo apt-get install -y tcpdump)
+      - name: Verify real local text and image inference and observe both endpoints
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MODO: ${{ matrix.modo }}
+        run: bash scripts/verificar_inferencia_local.sh "$MODO"
+
+  publicar-windows:
+    needs: [python-security, windows-dependencies, container-scan, inferencia-local]
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      ((github.event_name == 'workflow_dispatch' && inputs.publicar) ||
+       (github.event_name == 'push' && contains(github.event.head_commit.message, '[publicar-windows]')))
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    concurrency: publicar-windows
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Publish Windows ZIP and checksum from the verified commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="$(PYTHONPATH=backend python -c 'from app.version import APP_VERSION; print(APP_VERSION)')"
+          tag="Pluma.$version"
+          python scripts/empaquetar_windows.py --ref "$GITHUB_SHA"
+          (cd dist && sha256sum -c *.sha256)
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "La publicación $tag ya existe. Se conserva intacta."
+            exit 1
+          fi
+          gh release create "$tag" --draft --target "$GITHUB_SHA" --title "PlumA $version" --notes-file "releases/$version.md" dist/*.zip dist/*.sha256
+          gh release edit "$tag" --draft=false

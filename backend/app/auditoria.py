@@ -65,6 +65,7 @@ def generar_ficha_tecnica(
     propuesta: Any,
     deteccion: Any,
     sha256_documento: str | None,
+    archivos: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     campos = list(getattr(propuesta, "campos", []) or [])
     estados = [_estado_evidencia(c) for c in campos]
@@ -82,6 +83,8 @@ def generar_ficha_tecnica(
         "documento": {
             "nombre": getattr(documento, "nombre_original", None),
             "sha256": sha256_documento,
+            "sha256_envio": sha256_documento,
+            "archivos": archivos or [],
             "tipo_mime": getattr(documento, "tipo_mime", None),
             "tamano_bytes": getattr(documento, "tamano_bytes", None),
             "paginas": getattr(documento, "paginas", None),
@@ -138,8 +141,9 @@ def generar_ficha_tecnica(
             "advertencias": len(getattr(propuesta, "advertencias", []) or []),
             "nota": (
                 "La ficha no contiene texto documental ni valores propuestos; "
-                "solo metadatos técnicos y de control. El hash SHA-256 identifica "
-                "el fichero procesado sin almacenar su contenido."
+                "solo metadatos técnicos y de control. archivos[].sha256 se calcula sobre "
+                "los bytes de cada original. sha256_envio incluye el orden, los nombres y "
+                "el contenido del envío. El campo histórico sha256 conserva la huella del envío."
             ),
         },
     }

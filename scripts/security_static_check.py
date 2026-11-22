@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 try:
@@ -9,7 +10,7 @@ except Exception:  # pragma: no cover
 
 ROOT = Path(__file__).resolve().parents[1]
 
-APP_VERSION = "0.7.3"
+APP_VERSION = "0.7.4"
 
 
 def fail(msg: str) -> None:
@@ -101,6 +102,10 @@ def test_compose_local_locked() -> None:
     ollama = data["services"].get("ollama", {})
     if "bundled" not in (ollama.get("profiles") or []):
         fail("el servicio ollama debe estar bajo profiles: [bundled] en la arquitectura v0.7.0")
+    if not re.fullmatch(r"ollama/ollama:\d+\.\d+\.\d+@sha256:[a-f0-9]{64}", ollama.get("image", "")):
+        fail("Ollama debe estar fijado por etiqueta estable y digest SHA-256")
+    if ollama.get("environment", {}).get("OLLAMA_NO_CLOUD") != "1":
+        fail("el servicio Ollama debe fijar OLLAMA_NO_CLOUD=1")
     volumes = ollama.get("volumes") or []
     if "./offline/models:/offline/models:ro" not in volumes:
         fail("ollama debe montar ./offline/models:/offline/models:ro")
@@ -144,14 +149,6 @@ def test_version_coherence() -> None:
     files = {
         "backend/app/version.py": read(ROOT / "backend" / "app" / "version.py"),
         "docker-compose.yml": read(ROOT / "docker-compose.yml"),
-        # El workflow escanea con Trivy la imagen que construye el compose. Si
-        # el tag se queda atrás, `docker compose build app` produce
-        # pluma-app:<nueva> y Trivy busca pluma-app:<vieja>: el job falla al no
-        # encontrar la imagen en local y acaba intentando descargarla de Docker
-        # Hub. Se comprueba aquí para que la incoherencia salte antes de CI.
-        ".github/workflows/security-checks.yml": read(
-            ROOT / ".github" / "workflows" / "security-checks.yml"
-        ),
         "backend/Dockerfile": read(ROOT / "backend" / "Dockerfile"),
         "backend/pyproject.toml": read(ROOT / "backend" / "pyproject.toml"),
         "frontend/static/app.js": read(ROOT / "frontend" / "static" / "app.js"),

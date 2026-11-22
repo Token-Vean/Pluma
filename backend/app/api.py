@@ -397,12 +397,13 @@ def _combinar_documentos(docs: list[router_entrada.DocumentoProcesado]) -> route
     )
 
 
-def _actualizar_hash_documento(h, indice: int, nombre: str, contenido: bytes) -> None:
+def _huella_original_y_actualizar_envio(h, indice: int, nombre: str, contenido: bytes) -> str:
     h.update(str(indice).encode("utf-8"))
     h.update(b"\0")
     h.update(nombre.encode("utf-8", errors="replace"))
     h.update(b"\0")
     h.update(contenido)
+    return hashlib.sha256(contenido).hexdigest()
 
 
 async def _procesar_archivos_subidos(
@@ -427,10 +428,11 @@ async def _procesar_archivos_subidos(
             )
 
         nombre = archivo.filename or f"archivo_{i}"
+        sha256_original = None
         if h is not None:
             # En hilo aparte: sha256 sobre ficheros de decenas de MB bloquearía
             # el event loop y con él el polling de /api/estado de la interfaz.
-            await asyncio.to_thread(_actualizar_hash_documento, h, i, nombre, contenido)
+            sha256_original = await asyncio.to_thread(_huella_original_y_actualizar_envio, h, i, nombre, contenido)
 
         try:
             # procesar() es síncrono y puede tardar (spawn del sandbox, parseo,
@@ -439,7 +441,7 @@ async def _procesar_archivos_subidos(
                 router_entrada.procesar, contenido, nombre, preferencia_entrada
             )
         except ErrorValidacion as e:
-            _log_peticion("describir_validacion_fallida", peticion_id, archivo=i, error=str(e))
+            _log_peticion("describir_validacion_fallida", peticion_id, archivo=i)
             raise HTTPException(400, f"Archivo {i} ({nombre}): {e}") from None
         except Exception as err:
             logger.exception("[%s] Error inesperado en router para archivo %d", peticion_id, i)
@@ -451,6 +453,7 @@ async def _procesar_archivos_subidos(
         archivos_meta.append({
             "orden": i,
             "nombre": doc.nombre_original,
+            "sha256": sha256_original,
             "tipo_mime": doc.tipo_mime,
             "tamano_bytes": doc.tamano_bytes,
             "paginas": doc.paginas,
@@ -525,6 +528,11 @@ async def describir(
     archivos = _archivos_de_peticion(fichero=fichero, ficheros=ficheros)
 
     async with _SEM_PROCESAMIENTO:
+        try:
+            async with llm.cliente_local(llm.TIMEOUT_VERIFICACION_MODELO) as cliente:
+                await llm.verificar_motor_local(cliente)
+        except RuntimeError as exc:
+            raise HTTPException(503, str(exc)) from None
         _log_peticion(
             "describir_inicio",
             peticion_id,
@@ -714,6 +722,7 @@ async def describir(
         propuesta=propuesta,
         deteccion=deteccion,
         sha256_documento=sha256_documento,
+        archivos=archivos_meta,
     )
 
     return {
@@ -723,6 +732,7 @@ async def describir(
         "documento": {
             "nombre": doc.nombre_original,
             "sha256": sha256_documento,
+            "sha256_envio": sha256_documento,
             "tipo_mime": doc.tipo_mime,
             "tamano_bytes": doc.tamano_bytes,
             "paginas": doc.paginas,

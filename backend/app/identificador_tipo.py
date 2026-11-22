@@ -230,7 +230,7 @@ async def detectar(
     clave = data.get("tipo")
     tipo = catalogo.por_clave(clave) if clave else None
     if tipo is None:
-        logger.info("Detección sin coincidencia; clave devuelta: %r", clave)
+        logger.info("Detección sin coincidencia en el catálogo")
         tipo = catalogo.por_clave("no_identificado")
         if tipo is None:
             return None

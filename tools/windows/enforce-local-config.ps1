@@ -44,7 +44,7 @@ if (Test-Path -LiteralPath $envPath) {
 # desactivaba el aislamiento de proceso de los parsers de PDF/DOCX/imagen.
 $blocked = @(
     'OLLAMA_URL', 'ALLOW_REMOTE_OLLAMA', 'ALLOW_NETWORK_EXPOSURE',
-    'PLUMA_STRICT_LOCAL', 'PERFIL', 'COMPOSE_PROFILES',
+    'PLUMA_STRICT_LOCAL', 'OLLAMA_NO_CLOUD', 'PERFIL', 'COMPOSE_PROFILES',
     'MODELO_NOMBRE', 'MODELFILE_PATH',
     'PLUMA_OLLAMA_MODE', 'PLUMA_OLLAMA_URL',
     'USAR_SANDBOX_PARSERS', 'SANDBOX_TIMEOUT_SEGUNDOS', 'SANDBOX_MEMORIA_MB',
@@ -79,38 +79,44 @@ Ensure-Line 'MODELO_BASE' 'gemma4:e2b'
 # -----------------------------------------------------------------------------
 # Detección de Ollama nativo en el host
 # -----------------------------------------------------------------------------
-# Leer MODELO_BASE del estado actual del texto. Es preferencia, no requisito:
-# si no existe, la UI permitirá elegir otro modelo local descargado.
-$modeloBase = 'gemma4:e2b'
-$m = [regex]::Match($text, '(?m)^MODELO_BASE=(.+)$')
-if ($m.Success) { $modeloBase = $m.Groups[1].Value.Trim() }
-
 $perfil = 'bundled'
 $modo = 'container'
 $ollamaUrl = 'http://ollama:11434'
 $hostUtilizable = $false
 
+# El cliente consulta exclusivamente loopback y no sigue redirecciones.
+function Get-LocalOllamaJson([string]$Recurso) {
+    $req = [Net.HttpWebRequest]::Create("http://127.0.0.1:11434/api/$Recurso")
+    $req.Proxy = $null
+    $req.AllowAutoRedirect = $false
+    $req.Timeout = 5000
+    $req.ReadWriteTimeout = 5000
+    $resp = $req.GetResponse()
+    try {
+        if ([int]$resp.StatusCode -ne 200) { throw 'Respuesta HTTP inesperada de Ollama.' }
+        $reader = [IO.StreamReader]::new($resp.GetResponseStream())
+        try { return ($reader.ReadToEnd() | ConvertFrom-Json) } finally { $reader.Dispose() }
+    } finally { $resp.Dispose() }
+}
 try {
-    # 127.0.0.1 explícito: evita problemas de resolución IPv6 de localhost.
-    $resp = Invoke-WebRequest -Uri 'http://127.0.0.1:11434/api/tags' `
-                              -TimeoutSec 5 `
-                              -UseBasicParsing `
-                              -ErrorAction Stop
-    if ($resp.StatusCode -eq 200) {
-        $tags = $resp.Content | ConvertFrom-Json
-        $nombres = @($tags.models | ForEach-Object { $_.name } | Where-Object { $_ })
-        if ($nombres.Count -eq 0) {
-            Write-Host "Ollama del host responde, pero no hay modelos. Se usara el perfil bundled."
-        } elseif (($nombres -contains $modeloBase) -or ($nombres -contains ($modeloBase + ':latest'))) {
-            $hostUtilizable = $true
-            Write-Host "Ollama del host responde y tiene $modeloBase."
-        } else {
-            $hostUtilizable = $true
-            Write-Host "Ollama del host responde, pero no tiene $modeloBase. PlumA usara otro modelo local disponible: $($nombres[0])"
-        }
+    $version = (Get-LocalOllamaJson 'version').version
+    $matchVersion = [regex]::Match([string]$version, '^v?(\d{1,5}\.\d{1,5}\.\d{1,5})(?:\+[0-9A-Za-z.-]+)?$')
+    if ($version -isnot [string] -or -not $matchVersion.Success -or [version]$matchVersion.Groups[1].Value -lt [version]'0.35.0') {
+        throw 'Se requiere Ollama estable 0.35.0 o posterior.'
     }
+    $disabled = (Get-LocalOllamaJson 'status').cloud.disabled
+    if ($disabled -isnot [bool] -or -not $disabled) {
+        throw 'Para usar el motor nativo, active OLLAMA_NO_CLOUD=1 en el servicio Ollama y reinicielo.'
+    }
+    $nombres = @((Get-LocalOllamaJson 'tags').models | Where-Object {
+        $_.name -is [string] -and $_.name -and $_.name -notmatch '(:cloud|:[^:]*-cloud)$' -and
+        -not $_.remote_model -and -not $_.remote_host
+    } | ForEach-Object { $_.name })
+    if ($nombres.Count -eq 0) { throw 'El motor nativo no dispone de modelos locales.' }
+    $hostUtilizable = $true
+    Write-Host "Ollama $version con nube desactivada y modelos locales disponibles."
 } catch {
-    Write-Host "Ollama nativo no responde. Se usara el perfil bundled administrado por Docker."
+    Write-Host "Motor nativo no disponible para PlumA. $($_.Exception.Message) Se usara el motor de Docker."
 }
 
 if ($hostUtilizable) {

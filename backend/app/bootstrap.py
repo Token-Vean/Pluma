@@ -87,6 +87,8 @@ async def preparar() -> None:
             )
 
         await _esperar_ollama()
+        async with llm.cliente_local(_timeout_rapido()) as cliente:
+            version_motor = await llm.verificar_motor_local(cliente)
         modelos = await _listar_modelos()
         elegido = llm.elegir_nombre_preferido(modelos)
         if not elegido:
@@ -102,6 +104,7 @@ async def preparar() -> None:
             modelos=modelos,
             modelo_base=elegido,
             modelo_activo=elegido,
+            ollama_version=version_motor,
         )
         logger.info("Bootstrap completado: Ollama local disponible; modelo activo %s", elegido)
     except Exception as e:
@@ -143,3 +146,16 @@ async def _listar_modelos() -> list[str]:
                 if not _es_modelo_cloud(m["name"]) and not llm.es_entrada_remota(m):
                     modelos.append(m["name"])
         return modelos
+
+if __name__ == "__main__":
+    # Sondeo del instalador desde la misma imagen y red que utilizará PlumA.
+    async def comprobar_host() -> None:
+        async with llm.cliente_local(_timeout_rapido()) as cliente:
+            await llm.verificar_motor_local(cliente)
+        if not await _listar_modelos():
+            raise RuntimeError("No hay modelos locales descargados.")
+
+    try:
+        asyncio.run(comprobar_host())
+    except (RuntimeError, httpx.HTTPError, ValueError) as exc:
+        raise SystemExit(f"Ollama nativo no está disponible para PlumA: {exc}") from None

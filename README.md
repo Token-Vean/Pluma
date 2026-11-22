@@ -165,7 +165,7 @@ local/formativa:
 - Validación defensiva de JSON devuelto por el modelo.
 - Sanitización de CSV frente a fórmulas.
 - Endurecimiento adicional de ambos contenedores (`cap_drop`, `no-new-privileges`, límites de recursos; `read_only` y tmpfs en la app).
-- Workflow de seguridad con Bandit, pytest, `pip-audit`, build Docker y Trivy.
+- Workflow de seguridad con Bandit, pytest, `pip-audit`, build Docker y análisis Trivy de las imágenes de PlumA y Ollama.
 
 Sigue siendo una herramienta local de apoyo y formación, no una solución
 certificada para producción ni para tratamiento masivo de documentación
@@ -252,8 +252,7 @@ en el perfil correspondiente.
 Cada análisis incorpora una ficha técnica ligera de auditoría. La ficha
 no incluye el texto del documento ni los valores descriptivos
 propuestos: recoge metadatos de proceso, versión de PlumA, norma usada,
-ruta de procesamiento, estado del sandbox de parsers, hash SHA-256 del
-fichero y recuento de evidencias localizadas, no localizadas o no
+ruta de procesamiento, estado del sandbox de parsers, hash SHA-256 de los bytes de cada fichero, huella del envío completo y recuento de evidencias localizadas, no localizadas o no
 verificables textualmente.
 
 Esta ficha mejora la trazabilidad técnica del proceso, pero no sustituye
@@ -294,7 +293,7 @@ Estos scripts intentan crear `pluma-texto` desde `gemma4:e2b` y `pluma-vision` d
 
 ## Estado del proyecto
 
-**Versión 0.7.3 — seguridad y mantenimiento.** Esta versión está pensada para
+**Versión 0.7.4 — seguridad y mantenimiento.** Esta versión está pensada para
 evaluación por archiveros, formación, demostraciones y entornos de
 prueba controlados. **No es apta para producción** sin auditoría previa
 y sin las acciones que se describen en `SECURITY_HARDENING.md`

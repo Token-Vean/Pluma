@@ -44,6 +44,14 @@ después puede utilizarse sin conexión.
 
 ## Endurecimiento de Ollama nativo (modo host)
 
+Desde PlumA 0.7.4 el servicio nativo debe ejecutar Ollama estable 0.35.0 o posterior y tener desactivada la nube. En Windows, cierra Ollama desde el área de notificación, establece la variable de usuario `OLLAMA_NO_CLOUD` con valor `1` y vuelve a abrir Ollama. En macOS, ejecuta `launchctl setenv OLLAMA_NO_CLOUD 1` antes de volver a abrir la aplicación. En Linux con systemd, añade `Environment="OLLAMA_NO_CLOUD=1"` a la sección `[Service]` mediante `systemctl edit ollama`, ejecuta `systemctl daemon-reload` y reinicia el servicio. En un arranque manual se puede usar `OLLAMA_NO_CLOUD=1 ollama serve`.
+
+Comprueba `http://127.0.0.1:11434/api/version` y que `http://127.0.0.1:11434/api/status` devuelve `cloud.disabled` con el valor booleano `true`. Si el instalador no puede verificar el motor o sus modelos, selecciona el motor de Docker.
+
+PlumA carece de cuentas individuales. En escritorios remotos o equipos con sesiones simultáneas, cada persona debe trabajar en una instancia aislada, por ejemplo, una máquina virtual de uso individual.
+
+
+
 Cuando el instalador selecciona el perfil host, PlumA usa el Ollama
 nativo/local del usuario (`PLUMA_OLLAMA_MODE=host`) en lugar de levantar un
 segundo Ollama dentro de Docker. Esto evita duplicar modelos y asegura que se
@@ -114,3 +122,8 @@ servicios del sistema del archivero ni debe hacerlo: la herramienta
 asume que el usuario gestiona su propio Ollama. Lo que sí hace es
 advertir cuando detecta que va a usar el Ollama nativo, para que el
 usuario decida si quiere endurecerlo.
+
+
+## Verificar el ZIP de Windows
+
+En PowerShell, ejecuta `Get-FileHash .\PlumA-0_7_4-windows.zip -Algorithm SHA256` y compara la huella completa con el archivo `.sha256` de la misma publicación. Dentro del ZIP, `REVISION.txt` identifica el commit de origen. Para reproducirlo con Git y Python desde el repositorio, ejecuta `python scripts/empaquetar_windows.py --ref <commit>`. El resultado queda en `dist/`.

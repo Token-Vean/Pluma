@@ -8,6 +8,10 @@ de cada versión publicada, junto con su manifiesto SHA-256, están adjuntas a
 la entrada correspondiente de
 [GitHub Releases](https://github.com/Token-Vean/Pluma/releases).
 
+## 0.7.4
+
+Motor local verificado, huellas por fichero y distribución de Windows reproducible. Véanse las [notas de la versión](releases/0.7.4.md).
+
 ## [0.7.3] — 2026-10-30
 
 ### Seguridad
