@@ -1,7 +1,7 @@
 # Problemas conocidos y riesgos residuales
 
 Este documento recoge los problemas conocidos de PlumA en su versión
-**0.7.3**. Está pensado para que cualquier persona que evalúe la
+**0.7.4**. Está pensado para que cualquier persona que evalúe la
 herramienta para un piloto, una auditoría, o un despliegue controlado,
 sepa de antemano qué limitaciones existen.
 
@@ -14,7 +14,7 @@ Este fichero describe únicamente el estado vigente. El histórico de
 problemas resueltos en versiones anteriores está en `CHANGELOG.md` y en
 las notas de cada release de GitHub.
 
-## Pendientes y riesgos residuales — v0.7.3
+## Pendientes y riesgos residuales — v0.7.4
 
 ### Modelo de amenaza CSRF
 
@@ -49,7 +49,7 @@ Y `docker-compose.yml` referencia Ollama por tag fijado en el propio
 fichero (ya no es configurable por variable de entorno):
 
 ```
-image: ollama/ollama:0.21.2
+image: ollama/ollama:0.40.17
 ```
 
 Si las imágenes en Docker Hub se actualizan o se ven comprometidas, el
@@ -61,11 +61,23 @@ beta, fijar las imágenes por su digest SHA256:
 
 ```
 FROM python:3.12-slim-bookworm@sha256:XXXXXXXXX...
-image: ollama/ollama:0.21.2@sha256:YYYYYYYYY...
+image: ollama/ollama:0.40.17@sha256:YYYYYYYYY...
 ```
 
 Esto se hará tras el primer ciclo de pruebas con archiveros reales para
 fijar versiones validadas en la release candidate.
+
+Para obtener el digest de la imagen de Ollama ya validada:
+
+```
+docker pull ollama/ollama:0.40.17
+docker image inspect --format "{{index .RepoDigests 0}}" ollama/ollama:0.40.17
+```
+
+El valor devuelto (`ollama/ollama@sha256:…`) se copia tras la etiqueta en
+`docker-compose.yml`. Se usa el digest del índice multiplataforma, no el de
+una arquitectura concreta, para que Windows con WSL2, macOS con Apple Silicon
+y Linux resuelvan la misma referencia.
 
 ### Falta de fuzzing y cobertura ampliada de tests
 
@@ -230,15 +242,39 @@ alcanzable desde el contenedor mediante `host.docker.internal`; por ello el
 perfil `bundled` es la opción recomendada. La sección "Endurecimiento de
 Ollama nativo" de `INSTALACION.md` lo documenta.
 
-### Imagen oficial `ollama/ollama` no escaneada
+### Imagen oficial `ollama/ollama`: escaneo informativo
 
-El workflow `.github/workflows/security-checks.yml` ejecuta Trivy sobre
-`pluma-app:0.7.3` (la imagen que construimos). La imagen
-`ollama/ollama:0.21.2` que se usa en el perfil bundled no se escanea: es
-upstream y no la construimos nosotros. Los CVEs de Ollama deben
-monitorizarse en sus releases. Mantener la versión fijada en
-`docker-compose.yml` permite cambiarla deliberadamente cuando upstream
-publique parches relevantes.
+Desde la v0.7.4, el workflow `.github/workflows/security-checks.yml` escanea
+con Trivy también `ollama/ollama:0.40.17`, la imagen del perfil bundled. El
+escaneo es **informativo**: no bloquea la integración continua, porque la
+imagen es upstream y un aviso en ella no se corrige desde este repositorio.
+Lo que sí bloquea es la versión: `security_static_check.py` y
+`tests/test_release_configuration.py` fallan si el Compose fija una versión
+de Ollama anterior a la mínima de `bootstrap.VERSION_MINIMA_OLLAMA`, y el
+backend se niega a arrancar contra un Ollama anterior a esa versión, también
+en modo host. Cuando el escaneo muestre un aviso con corrección disponible,
+la decisión de actualizar la imagen sigue siendo manual y deliberada.
+
+### Comprobación de modelo local: depende de lo que declare el motor
+
+`llm.verificar_modelo_local()` consulta `/api/show` antes de cada inferencia
+y falla cerrado ante errores, respuestas ilegibles, metadatos de modelo remoto
+y, desde la v0.7.4, respuestas sin la estructura de un modelo almacenado en el
+equipo (`details` con formato o familia, y `model_info` o `modelfile`). Sigue
+siendo un control basado en lo que Ollama declara: un motor modificado podría
+mentir. La barrera que no depende de esa declaración es `OLLAMA_NO_CLOUD=1`
+en el propio Ollama, activa en el perfil bundled y documentada para el modo
+host en `INSTALACION.md`. La red del contenedor de Ollama sigue teniendo
+salida a Internet (necesaria para descargar modelos), así que el bloqueo de
+salida durante la inferencia no es de red.
+
+### Sin autenticación por persona
+
+La interfaz se publica en `127.0.0.1:8082` y aplica controles de navegador
+(Host/Origin/CSRF), pero no tiene usuarios. En servidores de escritorio
+remoto, aulas con equipos compartidos o máquinas con varias sesiones
+abiertas, cualquier sesión del mismo equipo puede usar la instancia de otra.
+En esos entornos, una instancia aislada por usuario.
 
 ## Cómo reportar nuevos problemas
 

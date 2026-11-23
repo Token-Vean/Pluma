@@ -83,3 +83,34 @@ def test_instaladores_conservan_fallback_bundled():
         assert "bundled" in text
     assert 'ollama pull "$MODELO_BASE"' in sh
     assert 'ollama pull "!MODELO_BASE!"' in bat
+
+
+def _version_minima_ollama() -> tuple[int, ...]:
+    import re
+
+    texto = (ROOT / "backend" / "app" / "bootstrap.py").read_text(encoding="utf-8")
+    m = re.search(r"VERSION_MINIMA_OLLAMA[^=]*=\s*\((\d+),\s*(\d+),\s*(\d+)\)", texto)
+    assert m, "no se encuentra VERSION_MINIMA_OLLAMA en bootstrap.py"
+    return tuple(int(x) for x in m.groups())
+
+
+def test_ollama_bundled_no_afectado_por_cve_2026_103663():
+    """Ollama < 0.35.0: path traversal en /api/pull con posible ejecución de
+    código como root en la imagen Docker oficial. El Compose debe fijar una
+    versión igual o posterior a la mínima que exige el backend."""
+    import re
+
+    data = yaml.safe_load((ROOT / "docker-compose.yml").read_text(encoding="utf-8"))
+    imagen = data["services"]["ollama"]["image"]
+    m = re.match(r"^ollama/ollama:v?(\d+)\.(\d+)\.(\d+)(?:@sha256:[0-9a-f]{64})?$", imagen)
+    assert m, f"imagen de Ollama sin versión fija reconocible: {imagen!r}"
+    assert tuple(int(x) for x in m.groups()) >= _version_minima_ollama()
+    assert _version_minima_ollama() >= (0, 35, 0)
+
+
+def test_ollama_bundled_en_modo_local():
+    """OLLAMA_NO_CLOUD=1 desactiva en el propio motor los modelos cloud y la
+    búsqueda web. Literal en el Compose, no sustituible desde .env."""
+    data = yaml.safe_load((ROOT / "docker-compose.yml").read_text(encoding="utf-8"))
+    env = data["services"]["ollama"].get("environment") or {}
+    assert env.get("OLLAMA_NO_CLOUD") == "1"

@@ -54,18 +54,38 @@ trabaja con los modelos que el usuario ya tiene descargados y controla.
 cambia `OLLAMA_HOST` a `0.0.0.0`, a una IP de la LAN o configura un
 servicio equivalente. En ese caso, otros equipos podrían alcanzar el motor.
 
-PlumA comprueba que el endpoint configurado sea local y, además, rechaza
-modelos de Ollama con etiquetas cloud. Aun así, si reutilizas un Ollama nativo
-conviene verificar su configuración antes de procesar documentación sensible.
+PlumA comprueba que el endpoint configurado sea local, rechaza los modelos
+cloud por su nombre y por sus metadatos, y comprueba antes de cada inferencia
+que Ollama describe el modelo como almacenado en el equipo. Aun así, si
+reutilizas un Ollama nativo conviene verificar su configuración antes de
+procesar documentación sensible.
+
+**Versión mínima: Ollama 0.35.0.** Las versiones anteriores están afectadas
+por CVE-2026-103663 (escritura de ficheros fuera del almacén de modelos al
+descargar un modelo, con posible ejecución de código). Desde la v0.7.4, PlumA
+no arranca si el Ollama al que se conecta es anterior a 0.35.0 y muestra en la
+interfaz cómo actualizarlo. Comprueba tu versión con:
+
+```
+ollama --version
+```
+
+Si es anterior, descarga la versión actual desde <https://ollama.com/download>,
+instálala, reinicia Ollama y vuelve a iniciar PlumA.
+
+**Modo local de Ollama.** Además de limitar Ollama a `127.0.0.1`, desactiva
+sus funciones cloud con la variable `OLLAMA_NO_CLOUD=1`. Con ella, el propio
+motor deja de ofrecer modelos cloud y búsqueda web, sin depender de los
+controles de PlumA. El contenedor del perfil `bundled` ya la trae activada.
 
 ### Windows
 
 Abre **Configuración → Sistema → Información → Configuración avanzada
-del sistema → Variables de entorno**, y añade una variable de **usuario**
+del sistema → Variables de entorno**, y añade dos variables de **usuario**
 (no del sistema, para no afectar a otros usuarios):
 
-- **Nombre:** `OLLAMA_HOST`
-- **Valor:** `127.0.0.1`
+- **Nombre:** `OLLAMA_HOST` · **Valor:** `127.0.0.1`
+- **Nombre:** `OLLAMA_NO_CLOUD` · **Valor:** `1`
 
 Cierra Ollama (icono en la bandeja del sistema → Quit) y vuelve a
 arrancarlo. Verifica con:
@@ -74,19 +94,23 @@ arrancarlo. Verifica con:
 netstat -ano | findstr :11434
 ```
 
-Debes ver `127.0.0.1:11434` y no `0.0.0.0:11434`.
+Debes ver `127.0.0.1:11434` y no `0.0.0.0:11434`. En el registro del
+servidor de Ollama (`%LOCALAPPDATA%\Ollama\server.log`) debe aparecer
+`Ollama cloud disabled: true`.
 
 ### macOS
 
 Cierra Ollama desde la barra de menú (icono → Quit) y arranca desde
-terminal con la variable de entorno:
+terminal con las variables de entorno:
 
 ```
-OLLAMA_HOST=127.0.0.1 ollama serve
+OLLAMA_HOST=127.0.0.1 OLLAMA_NO_CLOUD=1 ollama serve
 ```
 
 Para hacerlo permanente, edita tu `~/.zshrc` o `~/.bash_profile` y
-añade `export OLLAMA_HOST=127.0.0.1`.
+añade `export OLLAMA_HOST=127.0.0.1` y `export OLLAMA_NO_CLOUD=1`. Si
+arrancas Ollama como aplicación, usa `launchctl setenv OLLAMA_NO_CLOUD 1` y
+reinicia la aplicación.
 
 ### Linux (systemd)
 

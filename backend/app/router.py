@@ -566,10 +566,15 @@ def _ocr_imagenes(imagenes: list[bytes], *, nombre_origen: str = "documento") ->
         if _texto_ocr_suficiente(texto):
             partes.append(f"[OCR local - {etiqueta_origen} - página/imagen {i}]\n{texto.strip()}")
         elif texto:
+            # v0.7.4: el registro no lleva el nombre del fichero. Un nombre
+            # como «Expediente_GarciaLopez.pdf» es un dato personal y
+            # CUMPLIMIENTO.md declara que los logs no contienen nombres
+            # originales. Basta la posición de la página/imagen; la petición
+            # se identifica por los eventos de _log_peticion en api.py.
             logger.info(
-                "OCR local descartado por baja calidad en %s imagen %d (%d caracteres)",
-                etiqueta_origen,
+                "OCR local descartado por baja calidad en página/imagen %d de %d (%d caracteres)",
                 i,
+                len(seleccionadas),
                 len(texto),
             )
 

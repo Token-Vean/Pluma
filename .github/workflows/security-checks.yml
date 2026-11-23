@@ -70,8 +70,22 @@ jobs:
       - name: Trivy image scan
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
-          image-ref: 'pluma-app:0.7.3'
+          image-ref: 'pluma-app:0.7.4'
           format: 'table'
           severity: 'CRITICAL,HIGH'
           ignore-unfixed: true
           exit-code: '1'
+
+      # v0.7.4: la imagen de Ollama del perfil bundled también se escanea. Es
+      # upstream y un aviso en ella no se corrige desde este repositorio, así
+      # que el resultado es informativo (exit-code 0). Lo que sí bloquea es la
+      # versión mínima, comprobada por security_static_check.py y por
+      # tests/test_release_configuration.py.
+      - name: Trivy scan of bundled Ollama image (informativo)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: 'ollama/ollama:0.40.17'
+          format: 'table'
+          severity: 'CRITICAL,HIGH'
+          ignore-unfixed: true
+          exit-code: '0'

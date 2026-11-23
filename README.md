@@ -294,7 +294,7 @@ Estos scripts intentan crear `pluma-texto` desde `gemma4:e2b` y `pluma-vision` d
 
 ## Estado del proyecto
 
-**Versión 0.7.3 — seguridad y mantenimiento.** Esta versión está pensada para
+**Versión 0.7.4 — seguridad.** Esta versión está pensada para
 evaluación por archiveros, formación, demostraciones y entornos de
 prueba controlados. **No es apta para producción** sin auditoría previa
 y sin las acciones que se describen en `SECURITY_HARDENING.md`
@@ -312,6 +312,9 @@ Lo que se garantiza en esta versión:
 - Las medidas de seguridad razonables están aplicadas (CSRF activo,
   límites pre-parseo, sandbox de procesos para parsers, validación de
   imagen-bomba y zip-bomb, restricción de Ollama remoto).
+- El motor de IA es Ollama 0.35.0 o posterior: PlumA no arranca con una
+  versión afectada por CVE-2026-103663, y el perfil `bundled` usa Ollama
+  0.40.17 con las funciones cloud desactivadas (`OLLAMA_NO_CLOUD=1`).
 - Tests automáticos en CI con auditoría de dependencias y escaneo de
   imágenes Docker.
 - Documentación honesta sobre lo que falta (ver `KNOWN_ISSUES.md`).

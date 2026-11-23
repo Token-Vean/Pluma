@@ -1,0 +1,64 @@
+﻿PlumA 0.7.4 para Windows
+=============================
+
+PlumA propone descripciones archivísticas a partir de tus documentos.
+Los documentos y su contenido se procesan en este equipo. PlumA no usa
+servicios de IA remotos ni envía el contenido de los documentos a la nube.
+Solo necesita Internet durante la instalación, para descargar la imagen
+de Docker y, si no tienes Ollama, el modelo de IA.
+
+PRIMERA VEZ
+-----------
+1. Instala Docker Desktop y ábrelo:
+   https://www.docker.com/products/docker-desktop/
+2. Abre «PlumA - Instalar y abrir», en la carpeta principal.
+3. En el panel, pulsa «1. Comprobar requisitos» y después «2. Instalar».
+   La primera vez tarda varios minutos.
+
+Si ya tienes Ollama instalado en el equipo, debe ser la versión 0.35.0 o
+posterior (compruébalo con «ollama --version»). Las anteriores tienen un
+fallo de seguridad y PlumA no arranca con ellas. Actualízalo desde
+https://ollama.com/download antes de instalar.
+
+No muevas ni renombres las carpetas «ayuda» y «programa»: el panel las
+necesita junto a «PlumA - Instalar y abrir».
+
+DÍAS SIGUIENTES
+---------------
+«PlumA - Instalar y abrir» > «Iniciar» > «Abrir PlumA».
+Al terminar, «Detener». Cerrar el panel no detiene PlumA.
+
+QUÉ HACE CADA BOTÓN
+-------------------
+1. Comprobar requisitos  Revisa Docker Desktop (lo abre si está parado),
+                         detecta Ollama y el espacio libre. No cambia nada.
+2. Instalar              Prepara la configuración, el motor de IA y la
+                         aplicación. Si no tienes Ollama, descarga el modelo
+                         (varios GB, solo la primera vez).
+Iniciar                  Arranca PlumA ya instalada.
+Abrir PlumA              Abre http://127.0.0.1:8082 en el navegador.
+Detener                  Detiene PlumA. Los datos y el modelo se conservan.
+Diagnóstico              Muestra el estado de Docker y del servicio.
+Ver registro             Abre el registro del panel.
+Desinstalar…             Elimina contenedores, volúmenes e imagen de PlumA.
+                         No borra estas carpetas ni tu Ollama.
+
+SI ALGO NO FUNCIONA
+-------------------
+- Aviso de seguridad al abrir: los ficheros descargados de Internet llevan
+  una marca de procedencia. Borra la carpeta, abre las propiedades del ZIP,
+  marca «Desbloquear» y vuelve a descomprimirlo.
+- El panel no se abre: Microsoft está retirando VBScript de Windows. Si tu
+  equipo lo tiene desactivado, usa «Abrir sin VBScript», en esta carpeta
+  (verás un instante una ventana negra).
+- Si tu organización bloquea los scripts de PowerShell, el panel no
+  funcionará. Consulta con tu servicio de informática.
+- PlumA dice que Ollama está afectado por un aviso de seguridad: tu Ollama
+  es anterior a 0.35.0. Actualízalo desde https://ollama.com/download,
+  reinícialo y pulsa «Iniciar».
+- El registro del panel está en %LOCALAPPDATA%\PlumA\panel\panel.log
+  (botón «Ver registro»). No contiene documentos.
+- Guía completa: programa\INSTALACION.md.
+
+PlumA es software libre (AGPL-3.0-or-later): programa\LICENSE.
+Código fuente: https://github.com/Token-Vean/Pluma

@@ -166,11 +166,44 @@ def es_entrada_remota(entrada: Any) -> bool:
     return any(str(entrada.get(campo) or "").strip() for campo in _CAMPOS_MODELO_REMOTO)
 
 
+def _texto_no_vacio(valor: Any) -> bool:
+    return isinstance(valor, str) and bool(valor.strip())
+
+
+def tiene_metadatos_de_modelo_local(datos: Any) -> bool:
+    """True si la respuesta de /api/show describe un modelo almacenado en el equipo.
+
+    v0.7.4: la ausencia de ``remote_host``/``remote_model`` no basta. Una
+    respuesta HTTP 200 con ``{}`` (o con un objeto sin la estructura habitual)
+    no dice nada sobre dónde se ejecuta el modelo, y aceptarla convertía la
+    comprobación previa en un control que dependía de que el motor informase
+    bien. Se exige la estructura que Ollama devuelve para un modelo con pesos
+    locales:
+
+    - ``details``: diccionario con ``format`` o ``family`` no vacíos.
+    - y además ``model_info`` (diccionario no vacío) o ``modelfile`` (texto no
+      vacío), que solo existen cuando hay un fichero de modelo que describir.
+
+    Ante cualquier respuesta ambigua, el llamante falla cerrado.
+    """
+    if not isinstance(datos, dict):
+        return False
+    detalles = datos.get("details")
+    if not isinstance(detalles, dict):
+        return False
+    if not (_texto_no_vacio(detalles.get("format")) or _texto_no_vacio(detalles.get("family"))):
+        return False
+    model_info = datos.get("model_info")
+    tiene_model_info = isinstance(model_info, dict) and bool(model_info)
+    return tiene_model_info or _texto_no_vacio(datos.get("modelfile"))
+
+
 async def verificar_modelo_local(nombre: str) -> None:
     """Comprueba en Ollama, antes de enviar ningún documento, que el modelo es local.
 
     Falla cerrado: si Ollama no confirma que el modelo es local (error HTTP,
-    respuesta ilegible o metadatos de modelo remoto), no se hace la inferencia.
+    respuesta ilegible, metadatos de modelo remoto o metadatos sin la
+    estructura de un modelo local), no se hace la inferencia.
     Se consulta en cada llamada, sin caché, para que sustituir un modelo ya
     comprobado por uno remoto con el mismo nombre no pase inadvertido.
     """
@@ -205,6 +238,12 @@ async def verificar_modelo_local(nombre: str) -> None:
             "PlumA está bloqueado para procesamiento local y rechaza modelos remotos de Ollama: "
             f"{nombre} delega la inferencia en un servidor externo, aunque su nombre no lleve "
             "la etiqueta :cloud. Seleccione un modelo descargado en este equipo."
+        )
+    if not tiene_metadatos_de_modelo_local(datos):
+        raise RuntimeError(
+            f"No se pudo comprobar en Ollama que el modelo {nombre} es local "
+            "(/api/show no describe un modelo almacenado en este equipo). "
+            "No se envía el documento."
         )
 
 

@@ -9,7 +9,7 @@ except Exception:  # pragma: no cover
 
 ROOT = Path(__file__).resolve().parents[1]
 
-APP_VERSION = "0.7.3"
+APP_VERSION = "0.7.4"
 
 
 def fail(msg: str) -> None:
@@ -164,10 +164,15 @@ def test_version_coherence() -> None:
         "SECURITY.md": read(ROOT / "SECURITY.md"),
         "README.md": read(ROOT / "README.md"),
         ".env.example": read(ROOT / ".env.example"),
+        # v0.7.4: el paquete de Windows se genera desde el repositorio.
+        "packaging/windows/ayuda/LEEME.txt": read(ROOT / "packaging" / "windows" / "ayuda" / "LEEME.txt"),
     }
     for file_name, text in files.items():
         if APP_VERSION not in text:
             fail(f"versión {APP_VERSION} ausente en {file_name}")
+    notas = ROOT / "packaging" / "windows" / "ayuda" / f"Novedades {APP_VERSION}.txt"
+    if not notas.exists():
+        fail(f"faltan las notas de la release para Windows: {notas.relative_to(ROOT)}")
     ok(f"versión {APP_VERSION} coherente en ficheros activos")
 
 
@@ -245,6 +250,51 @@ def test_no_request_url_path_in_security_code() -> None:
     ok("el backend no decide con request.url.path")
 
 
+def _version_minima_ollama() -> tuple[int, ...]:
+    """Lee VERSION_MINIMA_OLLAMA de bootstrap.py sin importar el backend."""
+    import re
+
+    texto = read(ROOT / "backend" / "app" / "bootstrap.py")
+    m = re.search(r"VERSION_MINIMA_OLLAMA[^=]*=\s*\((\d+),\s*(\d+),\s*(\d+)\)", texto)
+    if not m:
+        fail("no se encuentra VERSION_MINIMA_OLLAMA en backend/app/bootstrap.py")
+    return tuple(int(x) for x in m.groups())
+
+
+def test_bundled_ollama_engine() -> None:
+    """v0.7.4: Ollama < 0.35.0 está afectado por CVE-2026-103663. El Compose debe
+    fijar una versión igual o posterior a la mínima del backend, con el modo
+    local de Ollama activado, y el workflow debe escanear esa misma imagen."""
+    import re
+
+    text = read(ROOT / "docker-compose.yml")
+    if yaml is None:
+        m = re.search(r"image:\s*ollama/ollama:([^\s@]+)", text)
+        imagen = f"ollama/ollama:{m.group(1)}" if m else ""
+        no_cloud = 'OLLAMA_NO_CLOUD: "1"' in text
+    else:
+        servicio = yaml.safe_load(text)["services"].get("ollama", {})
+        imagen = str(servicio.get("image") or "")
+        no_cloud = (servicio.get("environment") or {}).get("OLLAMA_NO_CLOUD") == "1"
+    m = re.match(r"^ollama/ollama:v?(\d+)\.(\d+)\.(\d+)(?:@sha256:[0-9a-f]{64})?$", imagen)
+    if not m:
+        fail(f"imagen de Ollama sin versión fija reconocible: {imagen!r}")
+    version = tuple(int(x) for x in m.groups())
+    minima = _version_minima_ollama()
+    if version < minima:
+        fail(
+            f"Ollama {'.'.join(map(str, version))} es anterior a la mínima "
+            f"{'.'.join(map(str, minima))} (CVE-2026-103663)"
+        )
+    if not no_cloud:
+        fail('el servicio ollama debe declarar OLLAMA_NO_CLOUD: "1" como literal')
+    workflow = read(ROOT / ".github" / "workflows" / "security-checks.yml")
+    etiqueta = imagen.split("@", 1)[0]
+    if f"image-ref: '{etiqueta}'" not in workflow:
+        fail(f"el workflow no escanea la imagen de Ollama del Compose ({etiqueta})")
+    ok(f"{etiqueta} ≥ mínima, modo local de Ollama activo y escaneada en CI")
+
+
 if __name__ == "__main__":
     test_no_runtime_artifacts()
     test_no_legacy_modelfile()
@@ -257,4 +307,5 @@ if __name__ == "__main__":
     test_shutdown_button_policy()
     test_offline_structure_inside_repo()
     test_no_request_url_path_in_security_code()
+    test_bundled_ollama_engine()
     print("\nComprobaciones estáticas de repositorio superadas.")

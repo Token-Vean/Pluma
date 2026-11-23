@@ -8,6 +8,85 @@ de cada versión publicada, junto con su manifiesto SHA-256, están adjuntas a
 la entrada correspondiente de
 [GitHub Releases](https://github.com/Token-Vean/Pluma/releases).
 
+## [0.7.4] — sin publicar
+
+Versión de seguridad. Responde a la reevaluación del 22 de noviembre de 2026
+sobre la rama principal (b45ed2f) y el ZIP de Windows 0.7.3. La etiqueta 0.7.3
+identificaba dos configuraciones de seguridad distintas (el ZIP publicado y la
+rama principal con los controles de noviembre); desde esta versión, cada
+configuración distribuida lleva su propio número.
+
+### Seguridad
+
+- **Ollama 0.21.2 → 0.40.17 en el perfil bundled (CVE-2026-103663).** CERT
+  Polska amplió el 17 de noviembre el intervalo afectado de la vulnerabilidad
+  de path traversal en `/api/pull`: abarca todas las versiones anteriores a
+  0.35.0, incluida la 0.21.2 que fijaba PlumA. Un digest de capa manipulado
+  permite escribir fuera del almacén de modelos y, en la imagen Docker
+  oficial, ejecutar código como root al reiniciar (CVSS 9,4 con permiso de
+  escritura en el directorio de bibliotecas; 6,9 sin él). El Compose no
+  publica el puerto de Ollama en el anfitrión, lo que reducía el alcance
+  directo, pero el instalador ejecuta `ollama pull` en ese contenedor.
+- **Versión mínima de Ollama exigida por el backend.** `bootstrap.py` consulta
+  `/api/version` al arrancar y no deja la aplicación lista si el motor es
+  anterior a 0.35.0 (`VERSION_MINIMA_OLLAMA`) o no informa de su versión. Se
+  aplica también en modo host, donde PlumA reutiliza el Ollama del usuario: la
+  interfaz muestra cómo actualizarlo.
+- **`OLLAMA_NO_CLOUD=1` en el servicio Ollama del Compose**, como literal.
+  Desactiva en el propio motor los modelos cloud y la búsqueda web, una capa
+  que no depende de los controles de PlumA. `INSTALACION.md` explica cómo
+  activarlo en un Ollama nativo (modo host).
+- **La comprobación previa a la inferencia falla cerrado ante metadatos
+  ambiguos.** `llm.verificar_modelo_local()` aceptaba cualquier respuesta HTTP
+  200 de `/api/show` sin `remote_host`/`remote_model`, incluido un objeto JSON
+  vacío. Ahora exige la estructura de un modelo almacenado en el equipo
+  (`details` con formato o familia, y `model_info` o `modelfile`) y, si no la
+  encuentra, no envía el documento.
+- **El registro del OCR ya no incluye el nombre del fichero.** El aviso de
+  OCR descartado por baja calidad llevaba una etiqueta derivada del nombre
+  original; un apellido o una referencia de expediente podía quedar en los
+  logs, en contra de lo que declara `CUMPLIMIENTO.md`. Ahora registra solo la
+  posición de la página o imagen.
+- La integración continua escanea con Trivy también la imagen
+  `ollama/ollama` del perfil bundled (informativo, no bloquea), y
+  `security_static_check.py` falla si el Compose fija una versión de Ollama
+  anterior a la mínima, si falta `OLLAMA_NO_CLOUD` o si el workflow no escanea
+  la misma imagen que usa el Compose.
+
+### Paquete para Windows
+
+- **El paquete se genera desde el repositorio.** El lanzador
+  `PlumA - Instalar y abrir.vbs`, la carpeta `ayuda` y el panel PowerShell
+  (`panel/PlumAPanel.ps1` y `panel/scripts/`) solo existían en el ZIP: la
+  etiqueta publicada no permitía saber qué contenía el paquete. Ahora están
+  versionados (`packaging/windows/` y `panel/`) y
+  `scripts/empaquetar_windows.py` construye el ZIP a partir de los objetos de
+  Git de una referencia, con orden, fechas y permisos fijos, y escribe el
+  `.sha256`. Con `--verificar` comprueba que un ZIP coincide fichero a fichero
+  con una etiqueta. La estructura del paquete es la de la 0.7.3.
+- **«1. Comprobar requisitos» avisa de un Ollama afectado.** El panel lee la
+  versión del Ollama del equipo y, si es anterior a 0.35.0, lo marca como
+  requisito pendiente y explica cómo actualizarlo, antes de instalar.
+- La ayuda (`LEEME.txt`) y el aviso final de la instalación en modo host
+  mencionan la versión mínima de Ollama y `OLLAMA_NO_CLOUD=1`.
+
+### Incluido en la rama principal desde la 0.7.3
+
+- Bloqueo de modelos cloud de Ollama por su nombre (PR #20).
+- Filtrado de modelos remotos por los metadatos de Ollama en el catálogo y
+  comprobación con `/api/show` antes de procesar texto o imágenes (PR #23).
+- `pypdf` 6.21.2 → 6.21.4: corrige, entre otros, CVE-2026-119203.
+
+### Pendiente antes de publicar
+
+- Fijar `ollama/ollama:0.40.17` por digest tras validarlo (procedimiento en
+  `KNOWN_ISSUES.md`).
+- Validar el motor nuevo en modo nativo y en Docker, incluido `cap_drop: ALL`,
+  con un flujo de texto y otro de imagen sobre documentos sintéticos,
+  registrando las conexiones salientes durante la inferencia.
+- Publicar la etiqueta y adjuntar a la release el ZIP y el `.sha256`
+  generados desde ella.
+
 ## [0.7.3] — 2026-10-30
 
 ### Seguridad

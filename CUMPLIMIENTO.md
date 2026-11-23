@@ -217,12 +217,12 @@ proporcionalidad (RGPD art. 5.1.c).
 
 ### Limitaciones conocidas del despliegue actual
 
-En el estado actual del proyecto (versión 0.7.2), estas
+En el estado actual del proyecto (versión 0.7.4), estas
 limitaciones residuales se reconocen y se revisarán en versiones futuras:
 
 - **El contenedor de Ollama en perfil `bundled` corre como root**
   por la configuración por defecto de la imagen oficial
-  `ollama/ollama:0.21.2`. Esto es visible por cualquiera que
+  `ollama/ollama:0.40.17`. Esto es visible por cualquiera que
   inspeccione el contenedor; aunque no compromete los datos del
   anfitrión (Docker aísla el espacio de nombres), sí es un aspecto
   a mejorar. No aplica al perfil `host`, donde no gestionamos

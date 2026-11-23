@@ -12,8 +12,8 @@ versión publicada recibe parches de seguridad.
 
 | Versión              | Estado                      |
 |----------------------|-----------------------------|
-| 0.5.x                | Soporte activo (beta)       |
-| 0.4.x y anteriores   | Sin soporte                 |
+| 0.7.x (última)       | Soporte activo (beta)       |
+| 0.6.x y anteriores   | Sin soporte                 |
 
 ## Cómo reportar una vulnerabilidad
 
@@ -152,7 +152,7 @@ El proyecto se compromete a ejecutar, al menos en cada release,
 las siguientes comprobaciones:
 
 - `pip-audit` sobre las dependencias Python.
-- `docker scout cves --only-fixed pluma-app:0.7.3` o `trivy image --ignore-unfixed` sobre la imagen Docker de la aplicación.
+- `docker scout cves --only-fixed pluma-app:0.7.4` o `trivy image --ignore-unfixed` sobre la imagen Docker de la aplicación.
 - Revisión manual de CVE conocidos de `pypdf`, `pypdfium2`, `Pillow`, Tesseract, FastAPI/Starlette y librerías nativas de imagen/XML.
 - Criterio mínimo de release: 0 críticas, 0 altas corregibles y 0 medias corregibles. Las vulnerabilidades sin fixed version deben documentarse en `SECURITY_NOTES.md` junto con sus mitigaciones.
 

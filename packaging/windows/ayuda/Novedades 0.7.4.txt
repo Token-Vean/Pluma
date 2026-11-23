@@ -1,0 +1,72 @@
+# PlumA 0.7.4 — notas de la release para Windows
+
+PlumA es un asistente local de descripción archivística: a partir de un
+documento propone los campos de ISAD(G), DACS, ISAAR(CPF), ISDF, ISDIAH o un
+perfil simplificado de RiC, cada uno con su evidencia literal, su confianza y
+el resultado de verificarla. Las propuestas son borradores que el archivero
+debe revisar.
+
+La 0.7.4 es una versión de seguridad. Sustituye al paquete 0.7.3, que
+configuraba un motor de IA afectado por un aviso de seguridad. Se recomienda
+actualizar en todas las instalaciones.
+
+## Seguridad
+
+- **Motor de IA actualizado (Ollama 0.40.17).** Las versiones de Ollama
+  anteriores a la 0.35.0 tienen un fallo (CVE-2026-103663) que permite, al
+  descargar un modelo manipulado, escribir ficheros fuera de la carpeta de
+  modelos y, en la instalación dentro de Docker, ejecutar código. El paquete
+  0.7.3 usaba la 0.21.2.
+- **PlumA no arranca con un Ollama afectado.** Si usas el Ollama instalado en
+  tu equipo y es anterior a la 0.35.0, PlumA lo indica y explica cómo
+  actualizarlo. «1. Comprobar requisitos» lo avisa antes de instalar.
+- **Ollama en modo local.** El Ollama que PlumA arranca dentro de Docker
+  tiene desactivados los modelos en la nube y la búsqueda web. Si usas el
+  Ollama de tu equipo, `programa/INSTALACION.md` explica cómo activar el
+  mismo modo (variable `OLLAMA_NO_CLOUD=1`).
+- **Comprobación del modelo antes de procesar cada documento.** PlumA
+  rechaza los modelos de Ollama que se ejecutan en un servidor externo,
+  aunque se hayan renombrado para ocultarlo, y no envía el documento si
+  Ollama no confirma que el modelo está descargado en el equipo.
+- **Registros sin nombres de fichero.** El registro del reconocimiento de
+  texto (OCR) ya no incluye el nombre del documento subido.
+- **pypdf 6.21.4.** Corrige nuevos fallos de agotamiento de memoria o CPU al
+  leer PDF malformados.
+
+## Instalación
+
+1. Instala y abre Docker Desktop.
+2. Antes de descomprimir el ZIP: botón derecho > Propiedades > marca
+   «Desbloquear» > Aceptar. Así Windows no mostrará avisos al abrir PlumA.
+3. Descomprime el ZIP en un lugar fijo (por ejemplo, Documentos).
+4. Abre `PlumA - Instalar y abrir` y pulsa «1. Comprobar requisitos» y
+   «2. Instalar».
+
+Si ya tenías instalada la 0.7.3: detén PlumA desde su panel, copia tu
+`programa/.env` a la carpeta nueva si quieres conservar tus ajustes y pulsa
+«2. Instalar» en la carpeta nueva. Hay que instalar, no basta con «Iniciar»:
+así se construye la aplicación nueva y se descarga el motor actualizado. Los
+modelos descargados se conservan.
+
+Las imágenes de la 0.7.3 (`pluma-app:0.7.3` y `ollama/ollama:0.21.2`) quedan
+en Docker y no se usan. Para liberar espacio, puedes borrarlas desde Docker
+Desktop, en «Images».
+
+La interfaz se publica solo en <http://127.0.0.1:8082>. Si no hay un Ollama
+instalado en el equipo, la primera instalación descarga el modelo base
+(varios GB).
+
+## Limitaciones conocidas
+
+- El ZIP no está firmado digitalmente; comprueba su SHA-256 con el fichero
+  `.sha256` publicado junto a él. Desde esta versión, el ZIP se genera con
+  `scripts/empaquetar_windows.py` a partir del código versionado, y el mismo
+  script comprueba que el contenido de un ZIP coincide fichero a fichero con
+  la etiqueta publicada en GitHub.
+- La construcción de la imagen de la aplicación aún no es reproducible bit a
+  bit: las imágenes base se fijan por etiqueta y no por digest, y la imagen
+  aplica actualizaciones de Debian al construirse.
+- La interfaz no tiene usuarios: en equipos compartidos o con varias sesiones
+  abiertas, cada persona debe usar su propia instalación.
+- Si tu organización bloquea PowerShell por directiva, el panel no funcionará.
+- Más detalles en `programa/KNOWN_ISSUES.md`.

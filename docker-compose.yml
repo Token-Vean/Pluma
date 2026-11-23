@@ -19,6 +19,22 @@
 #   para que `host.docker.internal` resuelva también desde contenedores en
 #   Linux (en Windows/macOS ya resuelve de fábrica).
 #
+# Revisión de seguridad v0.7.4:
+# - Ollama 0.21.2 → 0.40.17. CVE-2026-103663 (CERT Polska, intervalo
+#   corregido el 17-nov-2026): path traversal en /api/pull que puede escribir
+#   fuera del almacén de modelos y, con permiso de escritura en el directorio
+#   de bibliotecas (caso de la imagen oficial), ejecutar código como root al
+#   reiniciar. Afecta a las versiones anteriores a 0.35.0. El puerto 11434 no
+#   se publica en el anfitrión, lo que reduce el alcance, pero el instalador
+#   ejecuta `ollama pull` dentro de este contenedor.
+# - OLLAMA_NO_CLOUD=1 en el servicio Ollama: desactiva en el propio motor los
+#   modelos cloud y la búsqueda web. Es la capa que no depende de PlumA; la
+#   comprobación de metadatos de llm.verificar_modelo_local() sigue activa
+#   como segunda barrera.
+# - El backend rechaza arrancar con un Ollama anterior a 0.35.0, también en
+#   modo host (bootstrap.VERSION_MINIMA_OLLAMA).
+# - Pendiente: fijar la imagen por digest tras validarla (ver KNOWN_ISSUES.md).
+#
 # Revisión de endurecimiento v0.7.2:
 # - Los controles de seguridad dejan de leerse de .env y pasan a valor literal
 #   en este fichero: USAR_SANDBOX_PARSERS, SANDBOX_TIMEOUT_SEGUNDOS,
@@ -81,10 +97,15 @@ services:
     # Imagen fijada deliberadamente en el fichero, sin override desde .env.
     # Para cambiarla hay que editar este fichero: es una decisión consciente
     # y auditable, no una variable de entorno.
-    image: ollama/ollama:0.21.2
+    image: ollama/ollama:0.40.17
     container_name: pluma-ollama
     profiles:
       - bundled
+    environment:
+      # Modo local de Ollama: sin modelos cloud ni búsqueda web. Valor literal,
+      # no sustituible desde .env. Tras arrancar, el log del contenedor debe
+      # mostrar «Ollama cloud disabled: true».
+      OLLAMA_NO_CLOUD: "1"
     volumes:
       - ollama-models:/root/.ollama
       - ./offline/models:/offline/models:ro
@@ -103,7 +124,7 @@ services:
     cpus: 4
 
   app:
-    image: pluma-app:0.7.3
+    image: pluma-app:0.7.4
     build: ./backend
     # Imagen construida en local; nunca se descarga de un registro.
     pull_policy: never
